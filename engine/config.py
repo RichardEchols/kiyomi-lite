@@ -27,6 +27,8 @@ DEFAULT_CONFIG = {
     # CLI provider settings
     "cli_path": "",  # optional custom CLI path
     "cli_timeout": 60,  # timeout for CLI calls in seconds
+    # Update settings
+    "auto_update": False,  # automatically update on startup without asking
 }
 
 

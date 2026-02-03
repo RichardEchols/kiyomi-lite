@@ -28,6 +28,7 @@ from ai import chat
 from memory import log_conversation, get_recent_context, extract_and_remember, load_all_memory, extract_facts_from_message, save_fact, export_memory, lookup_person
 from multi_user import UserManager
 from reminders import parse_reminder_from_message, add_reminder, list_active_reminders
+from updater import is_update_request, check_for_updates, perform_update, restart_bot
 from skills_integration import (
     run_post_message_hook, get_skills_prompt_context,
     get_skill_capabilities_prompt
@@ -171,6 +172,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_fact(f"Mood: {mood} - {brief_context}", "other", user_dir=user_memory_dir)
             break  # Only save one mood per message
     
+    # --- Update detection (early, before AI routing) ---
+    if is_update_request(user_msg):
+        await update.message.chat.send_action(ChatAction.TYPING)
+        logger.info(f"Update request detected: {user_msg}")
+        
+        try:
+            # Perform the update
+            update_result = await perform_update()
+            
+            if update_result['success']:
+                # Send success message to user
+                response = f"🎉 {update_result['message']}\n\n"
+                if update_result['changes']:
+                    response += f"**What's new:**\n{update_result['changes']}\n\n"
+                response += "Restarting in 3 seconds... 🔄"
+                
+                await update.message.reply_text(response, parse_mode="Markdown")
+                
+                # Log the update
+                log_conversation(user_msg, f"[Updated Kiyomi: {update_result['message']}]", user_dir=user_memory_dir)
+                
+                # Wait a moment, then restart
+                await asyncio.sleep(3)
+                await restart_bot()
+                
+            else:
+                # Update failed
+                error_response = f"❌ Update failed: {update_result['message']}"
+                await update.message.reply_text(error_response)
+                log_conversation(user_msg, f"[Update failed: {update_result['message']}]", user_dir=user_memory_dir)
+                
+        except Exception as e:
+            logger.error(f"Update process failed: {e}")
+            await update.message.reply_text(
+                f"❌ Sorry, the update failed with an error: {str(e)[:200]}...\n\n"
+                "Please try again later or contact support if the problem persists."
+            )
+        
+        return  # Don't process the message further
+    
     # Check for reminder
     reminder_info = parse_reminder_from_message(user_msg)
     if reminder_info:
@@ -229,6 +270,88 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "I had trouble generating that image. Please try again with a different description! 🎨"
             )
             return
+    
+    # Check for app building request
+    try:
+        from app_builder import is_app_request, build_app
+        
+        if await is_app_request(user_msg):
+            logger.info(f"App building request detected: {user_msg[:100]}...")
+            await update.message.chat.send_action(ChatAction.TYPING)
+            
+            # Send "building your app" message
+            building_msg = await update.message.reply_text("Building your app... 🔧✨")
+            
+            try:
+                # Generate the app
+                result = await build_app(user_msg, config)
+                
+                # Delete the "building" message
+                try:
+                    await building_msg.delete()
+                except Exception:
+                    pass
+                
+                if result["success"]:
+                    # Send success message with app details
+                    response = (
+                        f"✅ **{result['app_name']}** is ready!\n\n"
+                        f"📱 {result['description']}\n\n"
+                        f"💾 Saved to: `{result['file_path']}`\n\n"
+                        f"🌐 I've opened it in your browser. It's a single HTML file that works offline - "
+                        f"you can double-click it anytime to open it again!"
+                    )
+                    
+                    await update.message.reply_text(response, parse_mode="Markdown")
+                    
+                    # Also send the HTML file as a document so they can download it
+                    try:
+                        with open(result["file_path"], 'rb') as app_file:
+                            await update.message.reply_document(
+                                document=app_file,
+                                filename=Path(result["file_path"]).name,
+                                caption=f"📄 Here's your {result['app_name']} as a file!"
+                            )
+                    except Exception as send_error:
+                        logger.warning(f"Could not send app file: {send_error}")
+                    
+                    # Log the interaction
+                    log_conversation(
+                        user_msg, 
+                        f"[Generated app: {result['app_name']} - {result['file_path']}]", 
+                        user_dir=user_memory_dir
+                    )
+                    
+                    return
+                else:
+                    # App generation failed
+                    error_response = (
+                        f"❌ I had trouble building that app.\n\n"
+                        f"**Error:** {result['error'][:300]}...\n\n"
+                        f"Try rephrasing your request or asking for a simpler app!"
+                    )
+                    await update.message.reply_text(error_response, parse_mode="Markdown")
+                    log_conversation(user_msg, f"[App generation failed: {result['error'][:200]}...]", user_dir=user_memory_dir)
+                    return
+                    
+            except Exception as e:
+                # Delete the "building" message
+                try:
+                    await building_msg.delete()
+                except Exception:
+                    pass
+                
+                logger.error(f"App building error: {e}")
+                await update.message.reply_text(
+                    f"❌ Sorry, I had trouble building that app.\n\n"
+                    f"**Error:** {str(e)[:200]}...\n\n"
+                    f"Please try again with a different description! 🔧"
+                )
+                return
+    
+    except ImportError:
+        logger.warning("App builder module not available")
+        # Continue with normal processing
     
     # Classify and route
     task_type = classify_message(user_msg)
@@ -572,12 +695,15 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📋 **I Track Tasks** — To-dos caught from conversation\n"
         "🗓️ **I Manage Your Calendar** — Google Calendar integration\n"
         "🔗 **I Read Links** — Send me any URL\n"
-        "🔍 **I Search** — Current info, weather, news, anything\n\n"
+        "🔍 **I Search** — Current info, weather, news, anything\n"
+        "🔧 **I Build Apps** — Complete web applications from your descriptions\n\n"
         "**Just talk to me like a real person.** I pick up on:\n"
         "• \"My wife Sarah has a birthday March 15\"\n"
         "• \"Remind me to file the Johnson brief by Friday\"\n"
         "• \"Draft a demand letter for the Smith case\"\n"
-        "• \"I took my blood pressure, it was 130/80\"\n\n"
+        "• \"I took my blood pressure, it was 130/80\"\n"
+        "• \"Build me a client intake form\"\n"
+        "• \"Create a to-do list app\"\n\n"
         "🧾 **I Scan Receipts** — Send a photo with the caption \"receipt\":\n"
         "• I'll read every item, total, tax, and payment method\n"
         "• Auto-categorize and add to your budget tracker\n"
@@ -586,6 +712,12 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• \"How much did I spend on food this week?\"\n"
         "• \"What's my bank balance?\"\n"
         "• \"Am I on budget this month?\"\n\n"
+        "🔧 **I Build Custom Apps** — Say what you need, I'll create it:\n"
+        "• \"Build me a client intake form for my law firm\"\n"
+        "• \"Create a to-do list app with priorities\"\n"
+        "• \"Make me an expense tracker\"\n"
+        "• \"Build a calculator for my business\"\n"
+        "• Single HTML file, works offline, no dependencies!\n\n"
         "**Commands:**\n"
         "/memory — See everything I remember about you\n"
         "/health — Your health summary\n"
@@ -600,6 +732,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/profile doctor — Health card for your doctor\n"
         "/export — Export your profile\n"
         "/lookup [name] — Search memory for a person\n"
+        "/apps — See your built applications\n"
         "/help — Show this message\n"
         "/forget — Clear my memory\n\n"
         "The more we talk, the more useful I become. 💛",
@@ -1035,6 +1168,55 @@ async def post_init(app: Application):
     except Exception as e:
         logger.warning(f"Could not detect bot name: {e}")
     
+    # --- Startup update check ---
+    try:
+        config = load_config()
+        auto_update = config.get("auto_update", False)
+        chat_id = config.get("telegram_user_id", "")
+        
+        # Check for updates on startup
+        update_info = await check_for_updates()
+        
+        if update_info['available']:
+            if auto_update:
+                # Auto-update silently if enabled
+                logger.info("Auto-update enabled, updating silently...")
+                update_result = await perform_update()
+                if update_result['success']:
+                    logger.info(f"Auto-update successful: {update_result['message']}")
+                    if chat_id:
+                        try:
+                            message = (
+                                f"🎉 I updated myself to the latest version!\n\n"
+                                f"**What's new:**\n{update_result['changes']}\n\n"
+                                f"Ready to help you with the latest features! ✨"
+                            )
+                            await app.bot.send_message(chat_id, message, parse_mode="Markdown")
+                        except Exception as notify_error:
+                            logger.warning(f"Could not notify user of auto-update: {notify_error}")
+                    # Restart after auto-update
+                    await restart_bot()
+                else:
+                    logger.error(f"Auto-update failed: {update_result['message']}")
+            else:
+                # Notify user that updates are available
+                if chat_id:
+                    try:
+                        message = (
+                            f"🎉 Hey! I have updates available.\n\n"
+                            f"**What's new:**\n{update_info['changes']}\n\n"
+                            f"Say 'update' to get the latest features! ✨"
+                        )
+                        await app.bot.send_message(chat_id, message, parse_mode="Markdown")
+                        logger.info("Notified user about available updates")
+                    except Exception as notify_error:
+                        logger.warning(f"Could not notify user about updates: {notify_error}")
+        else:
+            logger.info("No updates available at startup")
+            
+    except Exception as e:
+        logger.error(f"Startup update check failed: {e}")
+    
     asyncio.create_task(proactive_check_loop(app))
     
     # Start the Scheduler (fires reminders, morning briefs, skill nudges)
@@ -1052,6 +1234,60 @@ async def post_init(app: Application):
         logger.warning(f"Scheduler failed to start: {e}")
     
     logger.info("🌸 Background tasks started")
+
+
+async def cmd_apps(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /apps command — show recent apps built by Kiyomi."""
+    await update.message.chat.send_action(ChatAction.TYPING)
+    
+    try:
+        from app_builder import get_recent_apps, get_app_stats
+        
+        apps = get_recent_apps(limit=10)
+        stats = get_app_stats()
+        
+        if not apps:
+            response = (
+                "🔧 **Your Apps**\n\n"
+                "No apps built yet! I can create apps for you.\n\n"
+                "**Try saying:**\n"
+                "• \"Build me a client intake form\"\n"
+                "• \"Create a to-do list app\"\n"
+                "• \"Make me a calculator\"\n"
+                "• \"Build a expense tracker\"\n\n"
+                "I'll generate a complete, self-contained HTML app that works offline! ✨"
+            )
+            await update.message.reply_text(response, parse_mode="Markdown")
+            return
+        
+        response = f"🔧 **Your Apps** ({stats['total_apps']} total, {stats['total_size_mb']} MB)\n\n"
+        
+        for app in apps:
+            response += (
+                f"**{app['app_name']}**\n"
+                f"📱 {app['description']}\n"
+                f"📅 Created: {app['created']} ({app['size_kb']} KB)\n"
+                f"📁 `{app['file_path']}`\n\n"
+            )
+        
+        response += (
+            "💡 **Tip:** Double-click any HTML file to open it in your browser!\n\n"
+            "Want a new app? Just tell me what you need! 🎯"
+        )
+        
+        # Split if too long for Telegram
+        if len(response) > 4000:
+            chunks = [response[i:i+4000] for i in range(0, len(response), 4000)]
+            for chunk in chunks:
+                await update.message.reply_text(chunk, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(response, parse_mode="Markdown")
+        
+    except ImportError:
+        await update.message.reply_text("App builder feature is being set up! 🔧")
+    except Exception as e:
+        logger.error(f"Apps command error: {e}")
+        await update.message.reply_text("Sorry, I had trouble loading your apps. 😅")
 
 
 def _build_app():
@@ -1082,6 +1318,7 @@ def _build_app():
     app.add_handler(CommandHandler("receipts", cmd_receipts))
     app.add_handler(CommandHandler("profile", cmd_profile))
     app.add_handler(CommandHandler("calendar", cmd_calendar))
+    app.add_handler(CommandHandler("apps", cmd_apps))
     
     # Messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
