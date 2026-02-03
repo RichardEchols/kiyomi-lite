@@ -16,16 +16,22 @@ from pathlib import Path
 from typing import Optional
 from collections import defaultdict
 
-import plaid
-from plaid.api import plaid_api
-from plaid.model.link_token_create_request import LinkTokenCreateRequest
-from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
-from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
-from plaid.model.transactions_get_request import TransactionsGetRequest
-from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
-from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
-from plaid.model.products import Products
-from plaid.model.country_code import CountryCode
+try:
+    import plaid
+    from plaid.api import plaid_api
+    from plaid.model.link_token_create_request import LinkTokenCreateRequest
+    from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+    from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
+    from plaid.model.transactions_get_request import TransactionsGetRequest
+    from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
+    PLAID_AVAILABLE = True
+except ImportError:
+    PLAID_AVAILABLE = False
+
+if PLAID_AVAILABLE:
+    from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
+    from plaid.model.products import Products
+    from plaid.model.country_code import CountryCode
 
 logger = logging.getLogger("kiyomi.plaid")
 
@@ -50,8 +56,10 @@ def _save_plaid_config(config: dict):
     PLAID_CONFIG_FILE.chmod(0o600)
 
 
-def _get_client(client_id: str, secret: str, env: str = "sandbox") -> plaid_api.PlaidApi:
+def _get_client(client_id: str, secret: str, env: str = "sandbox"):
     """Create a Plaid API client."""
+    if not PLAID_AVAILABLE:
+        raise ImportError("Plaid SDK not installed. Run: pip install plaid-python")
     env_map = {
         "sandbox": plaid.Environment.Sandbox,
         "production": plaid.Environment.Production,
