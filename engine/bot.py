@@ -22,7 +22,7 @@ from telegram.ext import (
 )
 from telegram.constants import ChatAction
 
-from config import load_config, save_config, get_api_key, CONFIG_DIR, MEMORY_DIR
+from config import load_config, save_config, get_api_key, get_cli_timeout, CONFIG_DIR, MEMORY_DIR
 from router import classify_message, pick_model
 from ai import chat
 from memory import log_conversation, get_recent_context, extract_and_remember, load_all_memory, extract_facts_from_message, save_fact, export_memory, lookup_person
@@ -42,6 +42,7 @@ from calendar_integration import (
     find_free_time, morning_briefing, setup_calendar,
     is_calendar_configured
 )
+from image_gen import is_image_request, generate_image
 
 _bot_log_handlers = [logging.FileHandler(CONFIG_DIR / "logs" / "kiyomi.log")]
 if sys.stdout is not None:
@@ -186,6 +187,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log_conversation(user_msg, f"[Reminder set: {reminder_info['text']}]", user_dir=user_memory_dir)
         return
     
+    # Check for image generation request
+    if is_image_request(user_msg):
+        logger.info(f"Image generation request detected: {user_msg[:100]}...")
+        await update.message.chat.send_action(ChatAction.UPLOAD_PHOTO)
+        
+        try:
+            # Generate image
+            result = await generate_image(user_msg, provider="auto")
+            
+            # Check if result is a file path or error message
+            if result and Path(result).exists():
+                # Send as photo
+                with open(result, 'rb') as photo_file:
+                    await update.message.reply_photo(
+                        photo=photo_file,
+                        caption=f"Here's your image! 🎨"
+                    )
+                
+                # Log the interaction
+                log_conversation(user_msg, f"[Generated image: {Path(result).name}]", user_dir=user_memory_dir)
+                
+                # Clean up temp file after sending
+                try:
+                    Path(result).unlink()
+                except Exception as cleanup_error:
+                    logger.warning(f"Could not clean up temp image file: {cleanup_error}")
+                
+                return
+            else:
+                # Generation failed, send error message
+                await update.message.reply_text(
+                    f"I had trouble generating that image. {result[:500]}..."
+                )
+                log_conversation(user_msg, f"[Image generation failed: {result[:200]}...]", user_dir=user_memory_dir)
+                return
+                
+        except Exception as e:
+            logger.error(f"Image generation error: {e}")
+            await update.message.reply_text(
+                "I had trouble generating that image. Please try again with a different description! 🎨"
+            )
+            return
+    
     # Classify and route
     task_type = classify_message(user_msg)
     provider, model = pick_model(task_type, config)
@@ -217,6 +261,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         api_key=api_key,
         system_prompt=system_prompt,
         history=conversation_history[-20:],
+        cli_path=config.get("cli_path", ""),
+        cli_timeout=get_cli_timeout(config),
     )
     
     # Update conversation history (store original message, not augmented)
@@ -471,6 +517,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 model=model,
                 api_key=api_key,
                 system_prompt=system_prompt,
+                cli_path=config.get("cli_path", ""),
+                cli_timeout=get_cli_timeout(config),
             )
             await update.message.reply_text(response[:4000])
 

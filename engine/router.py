@@ -61,16 +61,27 @@ def pick_model(task_type: str, config: dict) -> tuple[str, str]:
     """Pick the best model for this task.
     
     Returns: (provider, model_name)
+    
+    Considers both API and CLI providers.
+    CLI providers are preferred if available (user's existing subscriptions).
     """
     provider = config.get("provider", "gemini")
     
-    # If only one provider has a key, use that
+    # Check for CLI providers first (they use existing subscriptions)
+    from .config import detect_available_clis
+    available_clis = detect_available_clis()
+    
+    # Check API providers
     has_gemini = bool(config.get("gemini_key"))
     has_anthropic = bool(config.get("anthropic_key"))
     has_openai = bool(config.get("openai_key"))
     
     if task_type == 'simple':
-        # Simple tasks → cheapest model
+        # Simple tasks → fastest available (CLI preferred)
+        if "gemini-cli" in available_clis:
+            return ('gemini-cli', 'gemini')
+        if "claude-cli" in available_clis:
+            return ('claude-cli', 'claude')
         if has_gemini:
             return ('gemini', 'gemini-2.0-flash')
         if has_openai:
@@ -79,15 +90,24 @@ def pick_model(task_type: str, config: dict) -> tuple[str, str]:
             return ('anthropic', 'claude-sonnet-4-20250514')
     
     elif task_type == 'building':
-        # Complex tasks → best available
+        # Complex tasks → best quality (Claude preferred)
+        if "claude-cli" in available_clis:
+            return ('claude-cli', 'claude')
         if has_anthropic:
             return ('anthropic', 'claude-sonnet-4-20250514')
+        if "gemini-cli" in available_clis:
+            return ('gemini-cli', 'gemini')
         if has_gemini:
             return ('gemini', 'gemini-2.0-flash')
         if has_openai:
             return ('openai', 'gpt-4o')
     
     else:  # writing
+        # Writing tasks → good balance (CLI preferred)
+        if "claude-cli" in available_clis:
+            return ('claude-cli', 'claude')
+        if "gemini-cli" in available_clis:
+            return ('gemini-cli', 'gemini')
         if has_gemini:
             return ('gemini', 'gemini-2.0-flash')
         if has_openai:
@@ -96,5 +116,5 @@ def pick_model(task_type: str, config: dict) -> tuple[str, str]:
             return ('anthropic', 'claude-sonnet-4-20250514')
     
     # Fallback to configured provider
-    from config import get_model
+    from .config import get_model
     return (provider, get_model(config))

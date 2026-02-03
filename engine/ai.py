@@ -1,6 +1,6 @@
 """
 Kiyomi Lite — AI Provider Interface
-Unified interface to Gemini, Claude, and GPT.
+Unified interface to Gemini, Claude, GPT, and CLI tools.
 Handles all the complexity so the bot.py doesn't have to.
 """
 import asyncio
@@ -18,17 +18,25 @@ async def chat(
     system_prompt: str = "",
     history: list = None,
     tools_enabled: bool = True,
+    cli_path: str = "",
+    cli_timeout: int = 60,
 ) -> str:
     """Send a message to an AI provider and get a response.
     
     This is the ONLY function the bot needs to call.
     All provider-specific logic is hidden here.
+    Supports both API and CLI-based providers.
     """
-    if not api_key:
-        return "I'm not connected to an AI service yet. Please set up my connection in Settings."
-    
     if not message or not message.strip():
         return "I didn't catch that — could you say that again? 😊"
+    
+    # Check if this is a CLI provider
+    if provider.endswith("-cli"):
+        return await _chat_cli(message, provider, system_prompt, history, cli_path, cli_timeout)
+    
+    # API providers require API key
+    if not api_key:
+        return "I'm not connected to an AI service yet. Please set up my connection in Settings."
     
     try:
         if provider == "gemini":
@@ -42,6 +50,53 @@ async def chat(
     except Exception as e:
         logger.error(f"AI chat error ({provider}): {e}")
         return f"Sorry, I had trouble connecting to my AI brain. Error: {str(e)[:100]}"
+
+
+async def _chat_cli(
+    message: str,
+    provider: str,
+    system_prompt: str = "",
+    history: list = None,
+    cli_path: str = "",
+    cli_timeout: int = 60,
+) -> str:
+    """Chat via CLI tools (Claude Code CLI, Codex CLI, etc.)."""
+    try:
+        from cli_router import CLIRouter
+        
+        router = CLIRouter(timeout=cli_timeout)
+        
+        # Combine system prompt and message for CLI
+        full_prompt = message
+        if system_prompt:
+            full_prompt = f"{system_prompt}\n\nUser: {message}"
+        
+        # Add recent history context for CLI (last 4 messages)
+        if history:
+            recent_history = history[-4:]  # Last 2 conversations
+            history_text = ""
+            for msg in recent_history:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                history_text += f"{role.title()}: {content}\n"
+            
+            if history_text:
+                full_prompt = f"Recent conversation:\n{history_text}\n{full_prompt}"
+        
+        response = await router.chat(
+            message=full_prompt,
+            provider=provider,
+            cli_path=cli_path or None
+        )
+        
+        return response
+        
+    except ImportError:
+        logger.error("CLI router not available")
+        return "CLI routing is not available. Please use API provider instead."
+    except Exception as e:
+        logger.error(f"CLI chat error ({provider}): {e}")
+        return f"Sorry, I had trouble with the CLI tool. Error: {str(e)[:100]}"
 
 
 async def _chat_gemini(
