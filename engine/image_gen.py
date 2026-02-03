@@ -93,7 +93,7 @@ async def _generate_via_gemini_api(prompt: str) -> Optional[str]:
         from google import genai
         from google.genai import types
         
-        api_key = "AIzaSyCH9Ps-m977k-jt15bbg5Q6R_YQSLbnAyU"
+        api_key = os.environ.get("GEMINI_API_KEY", "")
         client = genai.Client(api_key=api_key)
         
         logger.info(f"Generating image via Gemini API: '{prompt[:100]}...'")
@@ -212,7 +212,7 @@ async def _generate_via_fal_ai(prompt: str) -> Optional[str]:
         import requests
         
         # Set API key from TOOLS.md
-        os.environ["FAL_KEY"] = "266da53d-60dd-4a35-ad18-19ea76131d85:d6f64598ff394a6cd1be12bb44cc30c1"
+        # FAL_KEY should be set in user's config/environment
         
         logger.info(f"Generating image via Fal AI: '{prompt[:100]}...'")
         
