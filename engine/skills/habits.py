@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from skills.base import Skill
+from engine.skills.base import Skill
 
 logger = logging.getLogger("kiyomi.skills.habits")
 

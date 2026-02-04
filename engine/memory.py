@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from config import MEMORY_DIR, load_config
+from engine.config import MEMORY_DIR, load_config
 
 logger = logging.getLogger(__name__)
 
