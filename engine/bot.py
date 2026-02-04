@@ -276,7 +276,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         from app_builder import is_app_request, build_app
         
-        if await is_app_request(user_msg):
+        if is_app_request(user_msg):
             logger.info(f"App building request detected: {user_msg[:100]}...")
             await update.message.chat.send_action(ChatAction.TYPING)
             
