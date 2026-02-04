@@ -103,10 +103,41 @@ async def _chat_gemini(
     message: str, model: str, api_key: str,
     system_prompt: str, history: list, tools_enabled: bool
 ) -> str:
-    """Chat via Google Gemini."""
-    import google.generativeai as genai
+    """Chat via Google Gemini — uses REST API directly for reliability."""
+    import json as _json
+    import urllib.request as _req
 
     def _sync_call():
+        # Direct REST API call (bypasses google.generativeai library issues)
+        _model = model or "gemini-2.0-flash"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={api_key}"
+        
+        # Build contents
+        contents = []
+        if history:
+            for msg in history[-20:]:
+                role = "user" if msg.get("role") == "user" else "model"
+                contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+        contents.append({"role": "user", "parts": [{"text": message}]})
+        
+        payload = {"contents": contents}
+        if system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+        
+        try:
+            data = _json.dumps(payload).encode("utf-8")
+            request = _req.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+            with _req.urlopen(request, timeout=30) as resp:
+                result = _json.loads(resp.read().decode("utf-8"))
+                text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                return text or "(No response from Gemini)"
+        except Exception as e:
+            logger.error(f"Gemini REST API error: {e}")
+            return f"Sorry, I had trouble connecting. Error: {str(e)[:150]}"
+
+    # Keep old library-based code as fallback reference
+    def _sync_call_library():
+        import google.generativeai as genai
         genai.configure(api_key=api_key)
 
         tools = None

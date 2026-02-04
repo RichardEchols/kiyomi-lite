@@ -133,6 +133,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     
+    try:
+        await _handle_message_inner(update, context)
+    except Exception as e:
+        logger.error(f"Message handler crashed: {type(e).__name__}: {e}", exc_info=True)
+        try:
+            await update.message.reply_text(f"Sorry, something went wrong! Error: {str(e)[:200]}")
+        except Exception:
+            pass
+
+
+async def _handle_message_inner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inner message handler — all the real logic."""
     config = load_config()
     user_msg = update.message.text.strip()
     
