@@ -112,7 +112,7 @@ async def _chat_gemini(
         tools = None
         if tools_enabled:
             try:
-                from tools import TOOLS
+                from engine.tools import TOOLS
 
                 function_decls = []
                 for t in TOOLS:
@@ -174,7 +174,7 @@ async def _chat_gemini(
         # Tool execution loop (max 3 iterations)
         if tools_enabled and tools is not None:
             try:
-                from tools import execute_tool
+                from engine.tools import execute_tool
             except Exception:
                 execute_tool = None
 
@@ -242,7 +242,7 @@ async def _chat_anthropic(
         tools = None
         if tools_enabled:
             try:
-                from tools import get_anthropic_tools_schema
+                from engine.tools import get_anthropic_tools_schema
 
                 tools = get_anthropic_tools_schema()
             except Exception as e:
@@ -263,7 +263,7 @@ async def _chat_anthropic(
         if not tools_enabled or tools is None:
             return response.content[0].text
 
-        from tools import execute_tool
+        from engine.tools import execute_tool
 
         # Tool execution loop (max 3 iterations)
         for _ in range(3):
@@ -316,7 +316,7 @@ async def _chat_openai(
         tools = None
         if tools_enabled:
             try:
-                from tools import get_openai_tools_schema
+                from engine.tools import get_openai_tools_schema
 
                 tools = get_openai_tools_schema()
             except Exception as e:
@@ -335,7 +335,7 @@ async def _chat_openai(
         if not tools_enabled or tools is None:
             return response.choices[0].message.content
 
-        from tools import execute_tool
+        from engine.tools import execute_tool
 
         # Tool execution loop (max 3 iterations)
         for _ in range(3):

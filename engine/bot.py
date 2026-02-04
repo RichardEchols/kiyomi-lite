@@ -22,12 +22,12 @@ from telegram.ext import (
 )
 from telegram.constants import ChatAction
 
-from config import load_config, save_config, get_api_key, get_cli_timeout, CONFIG_DIR, MEMORY_DIR
+from engine.config import load_config, save_config, get_api_key, get_cli_timeout, CONFIG_DIR, MEMORY_DIR
 from router import classify_message, pick_model
 from ai import chat
-from memory import log_conversation, get_recent_context, extract_and_remember, load_all_memory, extract_facts_from_message, save_fact, export_memory, lookup_person
-from multi_user import UserManager
-from reminders import parse_reminder_from_message, add_reminder, list_active_reminders
+from engine.memory import log_conversation, get_recent_context, extract_and_remember, load_all_memory, extract_facts_from_message, save_fact, export_memory, lookup_person
+from engine.multi_user import UserManager
+from engine.reminders import parse_reminder_from_message, add_reminder, list_active_reminders
 from updater import is_update_request, check_for_updates, perform_update, restart_bot
 from skills_integration import (
     run_post_message_hook, get_skills_prompt_context,
@@ -590,7 +590,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption = "What's in this image? Describe it and help me with whatever I might need."
 
         # Use analyze_image tool
-        from tools import analyze_image
+        from engine.tools import analyze_image
 
         result = analyze_image(str(photo_path), caption)
 
@@ -660,7 +660,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             content = file_path.read_text(encoding="utf-8", errors="replace")[:5000]
 
         elif suffix in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
-            from tools import analyze_image
+            from engine.tools import analyze_image
 
             caption = update.message.caption or "What's in this image?"
             result = analyze_image(str(file_path), caption)
@@ -885,7 +885,7 @@ async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show what Kiyomi remembers — organized by category."""
-    from memory import CATEGORIES, MEMORY_DIR, get_memory_summary
+    from engine.memory import CATEGORIES, MEMORY_DIR, get_memory_summary
     
     # Get user's memory directory
     telegram_id = str(update.effective_user.id)
@@ -936,7 +936,7 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /export command — send memory as .md and .docx files."""
     import tempfile
-    from tools import markdown_to_docx
+    from engine.tools import markdown_to_docx
 
     config = load_config()
     name = config.get("name", "there")

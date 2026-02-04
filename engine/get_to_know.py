@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-from config import MEMORY_DIR, load_config, save_config
+from engine.config import MEMORY_DIR, load_config, save_config
 
 logger = logging.getLogger(__name__)
 

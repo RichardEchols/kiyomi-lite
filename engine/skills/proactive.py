@@ -11,10 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-try:
-    from config import CONFIG_DIR, load_config
-except ImportError:
-    from engine.config import CONFIG_DIR, load_config
+from engine.config import CONFIG_DIR, load_config
 
 logger = logging.getLogger("kiyomi.proactive")
 

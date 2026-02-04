@@ -23,10 +23,7 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Optional
 
-try:
-    from config import load_config, CONFIG_DIR
-except ImportError:
-    from engine.config import load_config, CONFIG_DIR
+from engine.config import load_config, CONFIG_DIR
 
 logger = logging.getLogger("kiyomi.nudges")
 

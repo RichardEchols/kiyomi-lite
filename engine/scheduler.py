@@ -13,10 +13,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-try:
-    from config import load_config, CONFIG_DIR
-except ImportError:
-    from engine.config import load_config, CONFIG_DIR
+from engine.config import load_config, CONFIG_DIR
 
 logger = logging.getLogger("kiyomi.scheduler")
 

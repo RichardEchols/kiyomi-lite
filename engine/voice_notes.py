@@ -16,9 +16,9 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from config import load_config
-from memory import extract_facts_from_message, save_fact
-from reminders import parse_reminder_from_message, add_reminder
+from engine.config import load_config
+from engine.memory import extract_facts_from_message, save_fact
+from engine.reminders import parse_reminder_from_message, add_reminder
 
 logger = logging.getLogger(__name__)
 

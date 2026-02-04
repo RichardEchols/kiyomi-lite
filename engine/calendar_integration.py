@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config import CONFIG_DIR, load_config
+from engine.config import CONFIG_DIR, load_config
 
 # ---------------------------------------------------------------------------
 # Paths

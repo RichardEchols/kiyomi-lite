@@ -68,7 +68,7 @@ def pick_model(task_type: str, config: dict) -> tuple[str, str]:
     provider = config.get("provider", "gemini")
     
     # Check for CLI providers first (they use existing subscriptions)
-    from config import detect_available_clis
+    from engine.config import detect_available_clis
     available_clis = detect_available_clis()
     
     # Check API providers
@@ -116,5 +116,5 @@ def pick_model(task_type: str, config: dict) -> tuple[str, str]:
             return ('anthropic', 'claude-sonnet-4-20250514')
     
     # Fallback to configured provider
-    from config import get_model
+    from engine.config import get_model
     return (provider, get_model(config))

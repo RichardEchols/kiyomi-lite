@@ -19,17 +19,9 @@ from datetime import datetime, timedelta, date
 from pathlib import Path
 from typing import Optional
 
-try:
-    from skills.base import Skill
-except ImportError:
-    from engine.skills.base import Skill
-
-try:
-    from plaid_integration import get_transactions, get_balances, is_bank_connected
-    from config import load_config
-except ImportError:
-    from engine.plaid_integration import get_transactions, get_balances, is_bank_connected
-    from engine.config import load_config
+from engine.skills.base import Skill
+from engine.plaid_integration import get_transactions, get_balances, is_bank_connected
+from engine.config import load_config
 
 log = logging.getLogger("kiyomi.financial_intelligence")
 

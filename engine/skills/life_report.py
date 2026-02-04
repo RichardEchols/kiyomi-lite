@@ -202,8 +202,8 @@ class LifeReportSkill(Skill):
 
         # Spending today
         try:
-            from plaid_integration import get_transactions, is_bank_connected
-            from config import load_config
+            from engine.plaid_integration import get_transactions, is_bank_connected
+            from engine.config import load_config
             config = load_config()
             if is_bank_connected():
                 plaid_cfg = config.get("plaid", {})
@@ -240,8 +240,8 @@ class LifeReportSkill(Skill):
 
         # ── Financial ──
         try:
-            from plaid_integration import spending_summary, is_bank_connected
-            from config import load_config
+            from engine.plaid_integration import spending_summary, is_bank_connected
+            from engine.config import load_config
             config = load_config()
             if is_bank_connected():
                 plaid_cfg = config.get("plaid", {})
@@ -302,7 +302,7 @@ class LifeReportSkill(Skill):
 
         # ── Kiyomi Stats ──
         try:
-            from memory import get_memory_stats
+            from engine.memory import get_memory_stats
             stats = get_memory_stats()
             lines.append("🧠 **KIYOMI STATS**")
             lines.append(f"  Facts remembered: {stats.get('total_facts', 0)}")

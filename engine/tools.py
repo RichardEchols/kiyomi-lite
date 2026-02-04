@@ -27,7 +27,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-from config import CONFIG_DIR, MEMORY_DIR, ensure_dirs, load_config
+from engine.config import CONFIG_DIR, MEMORY_DIR, ensure_dirs, load_config
 from url_reader import fetch_url
 
 FILES_DIR = CONFIG_DIR / "files"

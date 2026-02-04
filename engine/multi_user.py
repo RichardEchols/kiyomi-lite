@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, List, Dict
 from datetime import datetime
 
-from config import CONFIG_DIR
+from engine.config import CONFIG_DIR
 
 logger = logging.getLogger(__name__)
 

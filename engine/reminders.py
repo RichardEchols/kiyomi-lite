@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from config import CONFIG_DIR
+from engine.config import CONFIG_DIR
 
 # Regex for relative-time strings produced by parse_reminder_from_message
 # e.g. "30m", "2h", "10s"

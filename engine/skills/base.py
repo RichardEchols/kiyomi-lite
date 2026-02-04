@@ -11,10 +11,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 
-try:
-    from config import SKILLS_DIR
-except ImportError:
-    from engine.config import SKILLS_DIR
+from engine.config import SKILLS_DIR
 
 log = logging.getLogger(__name__)
 
