@@ -44,6 +44,7 @@ from calendar_integration import (
     is_calendar_configured
 )
 from image_gen import is_image_request, generate_image
+from computer_control import is_computer_action, execute_computer_action
 
 _bot_log_handlers = [logging.FileHandler(CONFIG_DIR / "logs" / "kiyomi.log")]
 if sys.stdout is not None:
@@ -352,6 +353,61 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ImportError:
         logger.warning("App builder module not available")
         # Continue with normal processing
+    
+    # Check for computer control request
+    if config.get("computer_control_enabled", True) and is_computer_action(user_msg):
+        logger.info(f"Computer control request detected: {user_msg[:100]}...")
+        
+        # Get the appropriate provider and API key for computer control
+        # Prefer anthropic for Agent TARS since it has good multimodal capabilities
+        computer_provider = config.get("provider", "anthropic")
+        computer_api_key = get_api_key(config)
+        computer_timeout = config.get("agent_tars_timeout", 120)
+        
+        if not computer_api_key:
+            await update.message.reply_text(
+                "I need an AI provider API key to control your computer.\n\n"
+                "Please set up your AI connection in Kiyomi settings first."
+            )
+            return
+        
+        # Optional confirmation step
+        if config.get("computer_control_confirm", True):
+            await update.message.reply_text(
+                f"🤖 I'm about to control your computer to: **{user_msg}**\n\n"
+                f"This will be performed by Agent TARS using {computer_provider}. "
+                f"This may take 30-120 seconds.\n\n"
+                f"Starting computer control...",
+                parse_mode="Markdown"
+            )
+        
+        # Show typing indicator for computer actions
+        await update.message.chat.send_action(ChatAction.TYPING)
+        
+        try:
+            # Execute the computer action
+            result = await execute_computer_action(
+                message=user_msg,
+                provider=computer_provider,
+                api_key=computer_api_key,
+                timeout=computer_timeout
+            )
+            
+            # Send the result
+            await update.message.reply_text(result)
+            
+            # Log the interaction
+            log_conversation(user_msg, f"[Computer Control] {result[:200]}...", user_dir=user_memory_dir)
+            
+            return
+            
+        except Exception as e:
+            logger.error(f"Computer control error: {e}")
+            await update.message.reply_text(
+                f"❌ Computer control failed: {str(e)[:200]}...\n\n"
+                f"Please try again or contact support if the problem persists."
+            )
+            return
     
     # Classify and route
     task_type = classify_message(user_msg)

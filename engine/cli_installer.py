@@ -17,14 +17,16 @@ logger = logging.getLogger(__name__)
 CLI_PACKAGES = {
     "claude": "@anthropic-ai/claude-code", 
     "codex": "@openai/codex",
-    "gemini": "@google/gemini-cli"
+    "gemini": "@google/gemini-cli",
+    "agent-tars": "@agent-tars/cli@latest"
 }
 
 # Auth URLs for each provider
 AUTH_URLS = {
     "claude": "https://console.anthropic.com/settings/keys",
     "codex": "https://platform.openai.com/api-keys", 
-    "gemini": "https://ai.google.dev/gemini-api/docs/api-key"
+    "gemini": "https://ai.google.dev/gemini-api/docs/api-key",
+    "agent-tars": "https://agent-tars.com/guide/get-started/quick-start.html"
 }
 
 
@@ -233,6 +235,13 @@ async def install_cli(provider: str) -> Dict[str, any]:
                     "2. Create a new API key", 
                     "3. Run: gemini auth"
                 ]
+            elif provider == "agent-tars":
+                result["next_steps"] = [
+                    "1. Agent TARS supports multiple AI providers (anthropic, openai, volcengine)",
+                    "2. Get your provider API key",
+                    "3. Use with: agent-tars --provider anthropic --apiKey YOUR_KEY",
+                    "4. See https://agent-tars.com/guide/get-started/quick-start.html"
+                ]
             
             logger.info(f"{provider} CLI installed successfully")
         else:
@@ -243,6 +252,80 @@ async def install_cli(provider: str) -> Dict[str, any]:
     except Exception as e:
         result["error"] = f"Installation error: {str(e)}"
         logger.error(f"Error installing {provider} CLI: {e}")
+    
+    return result
+
+
+async def install_agent_tars() -> Dict[str, any]:
+    """
+    Install Agent TARS CLI for computer control.
+    Requires Node.js >= 22.
+    
+    Returns:
+        dict: Installation result with status and next steps
+    """
+    logger.info("Installing Agent TARS CLI...")
+    
+    result = {
+        "provider": "agent-tars",
+        "package": "@agent-tars/cli@latest",
+        "success": False,
+        "steps_taken": [],
+        "next_steps": []
+    }
+    
+    try:
+        # Check prerequisites first
+        prereqs = await check_prerequisites()
+        
+        # Check Node.js version (Agent TARS requires >= 22)
+        if not prereqs["node"]["available"]:
+            result["error"] = "Node.js not found. Agent TARS requires Node.js >= 22"
+            result["next_steps"] = ["Install Node.js >= 22 from https://nodejs.org/"]
+            return result
+        
+        # Check Node.js version
+        node_version = prereqs["node"]["version"]
+        if node_version:
+            try:
+                # Extract major version number (e.g., "v22.1.0" -> 22)
+                version_num = int(node_version.lstrip('v').split('.')[0])
+                if version_num < 22:
+                    result["error"] = f"Node.js {version_num} found, but Agent TARS requires >= 22"
+                    result["next_steps"] = ["Update Node.js to version 22 or newer from https://nodejs.org/"]
+                    return result
+            except (ValueError, IndexError):
+                logger.warning(f"Could not parse Node.js version: {node_version}")
+        
+        # Install Agent TARS CLI globally
+        result["steps_taken"].append("Installing @agent-tars/cli@latest globally via npm...")
+        proc = await asyncio.create_subprocess_exec(
+            "npm", "install", "-g", "@agent-tars/cli@latest",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        
+        if proc.returncode == 0:
+            result["success"] = True
+            result["steps_taken"].append("Agent TARS CLI installed successfully")
+            result["stdout"] = stdout.decode()
+            result["next_steps"] = [
+                "Agent TARS is ready! It works with these providers:",
+                "• Anthropic Claude: --provider anthropic --apiKey YOUR_KEY",
+                "• OpenAI: --provider openai --apiKey YOUR_KEY",
+                "• Volcengine: --provider volcengine --apiKey YOUR_KEY",
+                "Example: agent-tars --provider anthropic --apiKey sk-... \"open Safari\""
+            ]
+            logger.info("Agent TARS CLI installed successfully")
+        else:
+            result["error"] = f"npm install failed: {stderr.decode()}"
+            result["stderr"] = stderr.decode()
+            logger.error(f"Failed to install Agent TARS CLI: {result['error']}")
+    
+    except Exception as e:
+        result["error"] = f"Installation error: {str(e)}"
+        logger.error(f"Error installing Agent TARS CLI: {e}")
     
     return result
 
@@ -288,6 +371,13 @@ async def check_cli_auth(provider: str) -> bool:
             # Gemini CLI: try a simple query
             proc = await asyncio.create_subprocess_exec(
                 "gemini", "auth", "status",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+        elif provider == "agent-tars":
+            # Agent TARS CLI: check if available (doesn't require persistent auth)
+            proc = await asyncio.create_subprocess_exec(
+                "agent-tars", "--help",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -367,7 +457,10 @@ async def auto_setup(provider: str) -> Dict[str, any]:
                 return result
         
         # CLI not installed - run installation
-        install_result = await install_cli(provider)
+        if provider == "agent-tars":
+            install_result = await install_agent_tars()
+        else:
+            install_result = await install_cli(provider)
         result["installation_result"] = install_result
         
         if install_result["success"]:

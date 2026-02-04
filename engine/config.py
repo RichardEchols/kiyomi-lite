@@ -27,6 +27,10 @@ DEFAULT_CONFIG = {
     # CLI provider settings
     "cli_path": "",  # optional custom CLI path
     "cli_timeout": 60,  # timeout for CLI calls in seconds
+    # Computer control settings
+    "computer_control_enabled": True,  # Enable/disable computer control
+    "computer_control_confirm": True,  # Ask before taking action
+    "agent_tars_timeout": 120,  # Timeout for computer actions
     # Update settings
     "auto_update": False,  # automatically update on startup without asking
 }
@@ -94,7 +98,8 @@ def detect_available_clis() -> dict:
     cli_tools = {
         "claude-cli": "claude",
         "codex-cli": "codex", 
-        "gemini-cli": "gemini"
+        "gemini-cli": "gemini",
+        "agent-tars": "agent-tars"
     }
     
     for provider, cli_name in cli_tools.items():
