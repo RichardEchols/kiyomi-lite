@@ -85,7 +85,7 @@ def pick_model(task_type: str, config: dict) -> tuple[str, str]:
         if has_gemini:
             return ('gemini', 'gemini-2.0-flash')
         if has_openai:
-            return ('openai', 'gpt-4o-mini')
+            return ('openai', 'gpt-5.2')
         if has_anthropic:
             return ('anthropic', 'claude-sonnet-4-20250514')
     
@@ -100,7 +100,7 @@ def pick_model(task_type: str, config: dict) -> tuple[str, str]:
         if has_gemini:
             return ('gemini', 'gemini-2.0-flash')
         if has_openai:
-            return ('openai', 'gpt-4o')
+            return ('openai', 'gpt-5.2')
     
     else:  # writing
         # Writing tasks → good balance (CLI preferred)
@@ -111,7 +111,7 @@ def pick_model(task_type: str, config: dict) -> tuple[str, str]:
         if has_gemini:
             return ('gemini', 'gemini-2.0-flash')
         if has_openai:
-            return ('openai', 'gpt-4o-mini')
+            return ('openai', 'gpt-5.2')
         if has_anthropic:
             return ('anthropic', 'claude-sonnet-4-20250514')
     

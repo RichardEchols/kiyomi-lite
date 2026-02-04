@@ -756,7 +756,7 @@ def analyze_image(image_path: str, question: str = "") -> str:
             media_type = media_map.get(suffix, "image/jpeg")
 
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-5.2",
                 max_tokens=1024,
                 messages=[{
                     "role": "user",

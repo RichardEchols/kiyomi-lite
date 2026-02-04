@@ -324,7 +324,7 @@ async def _chat_openai(
                 tools = None
 
         create_kwargs = {
-            "model": model or "gpt-4o-mini",
+            "model": model or "gpt-5.2",
             "messages": messages,
         }
         if tools:
