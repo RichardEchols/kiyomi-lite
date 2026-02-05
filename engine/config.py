@@ -82,7 +82,7 @@ def get_model(config: dict) -> str:
     defaults = {
         "gemini": "gemini-2.0-flash",
         "anthropic": "claude-sonnet-4-20250514",
-        "openai": "gpt-5.2",
+        "openai": "gpt-4o",
         "claude-cli": "claude",  # CLI providers use the CLI name as "model"
         "codex-cli": "codex",
         "gemini-cli": "gemini",

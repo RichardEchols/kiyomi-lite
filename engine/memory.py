@@ -499,6 +499,27 @@ def get_memory_summary(user_dir: Optional[Path] = None) -> dict:
     return summary
 
 
+def get_memory_stats(user_dir: Optional[Path] = None) -> dict:
+    """Return aggregate memory stats for life reports."""
+    summary = get_memory_summary(user_dir)
+    total_facts = sum(v.get("facts", 0) for v in summary.values())
+
+    # Count conversation logs from the last 7 days
+    memory_dir = user_dir if user_dir is not None else MEMORY_DIR
+    convos_dir = memory_dir / "conversations"
+    conversations_7d = 0
+    if convos_dir.exists():
+        cutoff = datetime.now() - timedelta(days=7)
+        for f in convos_dir.iterdir():
+            if f.suffix == ".md" and f.stat().st_mtime >= cutoff.timestamp():
+                conversations_7d += 1
+
+    return {
+        "total_facts": total_facts,
+        "conversations_7d": conversations_7d,
+    }
+
+
 # ── Contact / Person Lookup ──────────────────────────────────
 
 def lookup_person(name: str, user_dir: Optional[Path] = None) -> str:

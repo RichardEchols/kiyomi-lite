@@ -46,11 +46,22 @@ class _TextExtractor(HTMLParser):
 
     def get_text(self) -> str:
         raw = ''.join(self.parts)
-        # Collapse whitespace
+        # Strip each line but keep blank lines as paragraph separators
         lines = [line.strip() for line in raw.splitlines()]
-        # Remove empty lines but keep paragraph breaks
-        text = '\n'.join(line for line in lines if line)
-        return text
+        # Collapse consecutive blank lines into one, remove leading/trailing blanks
+        result: list[str] = []
+        prev_blank = True  # treat start as blank to skip leading empties
+        for line in lines:
+            if line:
+                result.append(line)
+                prev_blank = False
+            elif not prev_blank:
+                result.append('')  # keep one blank line between paragraphs
+                prev_blank = True
+        # Remove trailing blank if present
+        if result and result[-1] == '':
+            result.pop()
+        return '\n'.join(result)
 
 
 def find_urls(text: str) -> list[str]:
@@ -150,6 +161,37 @@ def fetch_url(url: str, max_chars: int = 3000, timeout: int = 10) -> str | None:
     return result
 
 
+def _extract_paragraphs(text: str, max_paragraphs: int = 12, min_len: int = 40) -> list[str]:
+    """Extract clean, numbered paragraph-like chunks from text."""
+    # Normalize whitespace
+    normalized = re.sub(r'\r\n?', '\n', text)
+    normalized = re.sub(r'[ \t]+', ' ', normalized)
+    # Split on blank lines
+    raw_paras = [p.strip() for p in re.split(r'\n\s*\n', normalized) if p.strip()]
+
+    cleaned: list[str] = []
+    for para in raw_paras:
+        # Drop obvious boilerplate / tiny fragments
+        if len(para) < min_len:
+            continue
+        # Remove repeated nav-like lines
+        para = re.sub(r'\s*•\s*', ' ', para).strip()
+        cleaned.append(para)
+        if len(cleaned) >= max_paragraphs:
+            break
+
+    return cleaned
+
+
+def _format_numbered_paragraphs(text: str, max_paragraphs: int = 12) -> str:
+    """Return numbered paragraphs for precise Q&A."""
+    paras = _extract_paragraphs(text, max_paragraphs=max_paragraphs)
+    if not paras:
+        return text
+    lines = [f"Paragraph {i + 1}: {p}" for i, p in enumerate(paras)]
+    return "\n\n".join(lines)
+
+
 def read_urls_in_message(message: str) -> str:
     """Find URLs in a message, fetch them, and return context for the AI.
     
@@ -158,13 +200,19 @@ def read_urls_in_message(message: str) -> str:
     urls = find_urls(message)
     if not urls:
         return ''
+
+    want_paragraphs = bool(re.search(r'\bparagraphs?\b|\bparas?\b|¶', message, re.IGNORECASE))
     
     # Limit to 3 URLs per message
     contexts = []
     for url in urls[:3]:
-        content = fetch_url(url)
+        content = fetch_url(url, max_chars=8000 if want_paragraphs else 3000)
         if content:
-            contexts.append(f"[Content from {url}]\n{content}")
+            if want_paragraphs:
+                numbered = _format_numbered_paragraphs(content, max_paragraphs=12)
+                contexts.append(f"[Numbered paragraphs from {url}]\n{numbered}")
+            else:
+                contexts.append(f"[Content from {url}]\n{content}")
     
     if not contexts:
         return ''

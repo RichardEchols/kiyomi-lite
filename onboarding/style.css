@@ -317,6 +317,26 @@ h1 {
     color: var(--success);
 }
 
+/* Provider status badges */
+.provider-status {
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 6px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    display: inline-block;
+}
+
+.provider-status.connected {
+    background: #E8F9ED;
+    color: #1B7D3C;
+}
+
+.provider-status.needs-auth {
+    background: #FFF3E0;
+    color: #E65100;
+}
+
 /* Telegram Steps */
 .telegram-steps {
     text-align: left;

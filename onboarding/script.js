@@ -1,23 +1,18 @@
 /**
  * Kiyomi Onboarding Wizard
- * Simple. Beautiful. Gets the job done.
+ * Subscription-first flow: connect existing AI subscriptions via CLI OAuth.
+ * API key entry is an advanced fallback.
  */
 
 let currentStep = 1;
-let selectedProvider = 'gemini';
+let selectedProvider = '';       // API key provider (advanced fallback)
+let selectedSubscription = '';   // CLI subscription provider
+let cliStatus = {};              // { claude: {installed, authenticated, ...}, ... }
 let importedFile = null;
+let claimedBot = null;           // Reserved for future use
 
-// Generate a random bot username on page load
-const randomSuffix = Math.random().toString(36).substr(2, 5);
-const suggestedBotUsername = `kiyomi_${randomSuffix}_bot`;
-document.addEventListener('DOMContentLoaded', () => {
-    const el = document.getElementById('suggested-username');
-    if (el) el.textContent = suggestedBotUsername;
-});
-
-// Copy text to clipboard (for BotFather steps)
+// Copy text to clipboard
 function copyText(text, element) {
-    // If it's the username, use the generated one
     if (text.startsWith('kiyomi_') && text.endsWith('_bot')) {
         text = suggestedBotUsername;
     }
@@ -26,14 +21,13 @@ function copyText(text, element) {
         const hint = element.querySelector('.copy-hint');
         if (hint) {
             const orig = hint.textContent;
-            hint.textContent = '✅ Copied!';
+            hint.textContent = 'Copied!';
             setTimeout(() => {
                 element.classList.remove('copied');
                 hint.textContent = orig;
             }, 2000);
         }
     }).catch(() => {
-        // Fallback for non-HTTPS
         const ta = document.createElement('textarea');
         ta.value = text;
         ta.style.position = 'fixed';
@@ -46,7 +40,7 @@ function copyText(text, element) {
         const hint = element.querySelector('.copy-hint');
         if (hint) {
             const orig = hint.textContent;
-            hint.textContent = '✅ Copied!';
+            hint.textContent = 'Copied!';
             setTimeout(() => {
                 element.classList.remove('copied');
                 hint.textContent = orig;
@@ -57,7 +51,8 @@ function copyText(text, element) {
 
 const config = {
     name: '',
-    provider: 'gemini',
+    provider: '',
+    cli_provider: '',
     gemini_key: '',
     anthropic_key: '',
     openai_key: '',
@@ -67,20 +62,31 @@ const config = {
     setup_complete: false,
 };
 
-// Navigation
+// ── Navigation ─────────────────────────────────────────────
+
 function showStep(step) {
     document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.dot').forEach(d => d.classList.remove('active'));
-    
+
     const stepEl = document.getElementById(`step-${step}`);
     const dotEl = document.querySelector(`.dot[data-step="${step}"]`);
-    
+
     if (stepEl) stepEl.classList.add('active');
     if (dotEl) dotEl.classList.add('active');
-    
+
     currentStep = step;
-    
-    // Focus first input if exists
+
+    // Auto-detect CLIs when entering step 2
+    if (step === 2) {
+        detectCLIs();
+    }
+
+    // Step 3: Telegram token entry (BotFather flow)
+    if (step === 3) {
+        const manualEl = document.getElementById('tg-manual');
+        if (manualEl) manualEl.style.display = 'block';
+    }
+
     setTimeout(() => {
         const input = stepEl?.querySelector('input:not([type="file"])');
         if (input) input.focus();
@@ -90,15 +96,20 @@ function showStep(step) {
 async function nextStep(from) {
     if (!validateStep(from)) return;
     saveStepData(from);
-    
-    // Step 4: trigger upload before advancing
+
+    // After step 3 (Telegram), all essential config is collected.
+    // Save config + start engine immediately so the bot works
+    // even if user doesn't finish steps 4-5.
+    if (from === 3) {
+        await saveConfigAndStartEngine();
+    }
+
     if (from === 4 && importedFile) {
         await uploadAndImport();
     }
-    
+
     showStep(from + 1);
-    
-    // Auto-trigger finish when entering Step 5
+
     if (from + 1 === 5) {
         finish();
     }
@@ -108,7 +119,8 @@ function prevStep(from) {
     showStep(from - 1);
 }
 
-// Validation
+// ── Validation ─────────────────────────────────────────────
+
 function validateStep(step) {
     switch (step) {
         case 1: {
@@ -120,20 +132,30 @@ function validateStep(step) {
             return true;
         }
         case 2: {
-            const key = document.getElementById('api-key').value.trim();
-            if (!key) {
-                shake(document.getElementById('api-key'));
-                return false;
+            // Valid if: subscription connected OR API key entered
+            if (selectedSubscription && cliStatus[selectedSubscription]?.authenticated) {
+                return true;
             }
-            return true;
+            const key = document.getElementById('api-key').value.trim();
+            if (key && selectedProvider) {
+                return true;
+            }
+            // Nothing selected — shake the grid
+            const grid = document.getElementById('sub-grid');
+            if (grid) shake(grid);
+            return false;
         }
         case 3: {
-            const token = document.getElementById('tg-token').value.trim();
-            if (!token || !token.includes(':')) {
-                shake(document.getElementById('tg-token'));
-                return false;
+            const tokenEl = document.getElementById('tg-token');
+            if (tokenEl) {
+                const token = tokenEl.value.trim();
+                if (!token || !token.includes(':')) {
+                    shake(tokenEl);
+                    return false;
+                }
+                return true;
             }
-            return true;
+            return false;
         }
         default:
             return true;
@@ -149,7 +171,6 @@ function shake(element) {
     }, 600);
 }
 
-// Add shake animation
 const style = document.createElement('style');
 style.textContent = `
     @keyframes shake {
@@ -160,7 +181,8 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-// Save step data
+// ── Save step data ─────────────────────────────────────────
+
 function saveStepData(step) {
     switch (step) {
         case 1:
@@ -168,53 +190,172 @@ function saveStepData(step) {
             document.getElementById('done-name').textContent = config.name;
             break;
         case 2: {
+            // Subscription-based (CLI)
+            if (selectedSubscription && cliStatus[selectedSubscription]?.authenticated) {
+                config.cli_provider = selectedSubscription;
+                config.provider = selectedSubscription + '-cli';
+            }
+            // API key fallback
             const key = document.getElementById('api-key').value.trim();
-            config.provider = selectedProvider;
-            config[`${selectedProvider}_key`] = key;
+            if (key && selectedProvider) {
+                config.provider = selectedProvider;
+                config[`${selectedProvider}_key`] = key;
+            }
             break;
         }
-        case 3:
-            config.telegram_token = document.getElementById('tg-token').value.trim();
+        case 3: {
+            const tokenEl = document.getElementById('tg-token');
+            config.telegram_token = tokenEl ? tokenEl.value.trim() : '';
             break;
+        }
     }
 }
 
-// Provider selection
+// ── CLI Detection (background only — no UI display) ───────
+
+async function detectCLIs() {
+    try {
+        const resp = await fetch('/api/cli/status');
+        if (!resp.ok) throw new Error('Status check failed');
+        const data = await resp.json();
+        cliStatus = data.providers || {};
+        // No auto-display, no auto-select — customer always starts fresh
+    } catch (e) {
+        console.log('CLI detection unavailable:', e);
+    }
+}
+
+// ── Subscription Selection ─────────────────────────────────
+
+function selectSubscription(provider) {
+    selectedSubscription = provider;
+
+    // Highlight selected card
+    document.querySelectorAll('#sub-grid .provider-card').forEach(c => c.classList.remove('selected'));
+    const card = document.getElementById(`sub-${provider}`);
+    if (card) card.classList.add('selected');
+
+    const panel = document.getElementById('connect-panel');
+    const checking = document.getElementById('connect-checking');
+    const ready = document.getElementById('connect-ready');
+    const needsAuth = document.getElementById('connect-needs-auth');
+
+    panel.style.display = 'block';
+    checking.style.display = 'none';
+    ready.style.display = 'none';
+    needsAuth.style.display = 'none';
+
+    // Always show "Sign In" — clean experience for every user
+    needsAuth.style.display = 'block';
+    const names = { claude: 'Claude', codex: 'ChatGPT', gemini: 'Google Gemini' };
+    const name = names[provider] || provider;
+    document.getElementById('auth-title').textContent = `Sign in to ${name}`;
+    document.getElementById('auth-desc').textContent =
+        'Click below to sign in with your subscription account. A browser window will open.';
+    document.getElementById('btn-auth').textContent = 'Sign In';
+}
+
+async function triggerAuth() {
+    if (!selectedSubscription) return;
+
+    const panel = document.getElementById('connect-panel');
+    const checking = document.getElementById('connect-checking');
+    const ready = document.getElementById('connect-ready');
+    const needsAuth = document.getElementById('connect-needs-auth');
+
+    checking.style.display = 'block';
+    needsAuth.style.display = 'none';
+    ready.style.display = 'none';
+
+    const info = cliStatus[selectedSubscription];
+    const names = { claude: 'Claude', codex: 'ChatGPT', gemini: 'Google Gemini' };
+    const name = names[selectedSubscription] || selectedSubscription;
+
+    try {
+        // Step 1: Install if needed
+        if (!info || !info.installed) {
+            document.getElementById('connect-action').textContent = `Installing ${name}...`;
+            document.getElementById('connect-hint').textContent = 'This only happens once.';
+
+            const installResp = await fetch('/api/cli/install', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: selectedSubscription }),
+            });
+            const installData = await installResp.json();
+
+            if (!installData.success) {
+                throw new Error(installData.error || 'Installation failed');
+            }
+
+            // Update local status
+            if (!cliStatus[selectedSubscription]) cliStatus[selectedSubscription] = {};
+            cliStatus[selectedSubscription].installed = true;
+        }
+
+        // Step 2: Trigger auth (install or open browser sign-in)
+        document.getElementById('connect-action').textContent = `Connecting ${name}...`;
+        document.getElementById('connect-hint').textContent = 'Sign in with your subscription account in the browser.';
+
+        const authResp = await fetch('/api/cli/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: selectedSubscription }),
+        });
+        const authData = await authResp.json();
+
+        // Re-check status to get account info
+        const statusResp = await fetch('/api/cli/status');
+        const statusData = await statusResp.json();
+        cliStatus = statusData.providers || {};
+
+        checking.style.display = 'none';
+        if (cliStatus[selectedSubscription]?.authenticated) {
+            const acct = cliStatus[selectedSubscription].account;
+            ready.style.display = 'block';
+            document.getElementById('connect-result').textContent =
+                `✓ Connected as ${acct || name}`;
+            document.getElementById('connect-account').textContent =
+                `Using your ${cliStatus[selectedSubscription].subscription || name} subscription`;
+            document.getElementById('connect-account').style.display = 'block';
+            document.getElementById('btn-switch-account').style.display = 'none';
+        } else {
+            // Auth might still be in progress
+            needsAuth.style.display = 'block';
+            document.getElementById('auth-title').textContent = 'Almost there!';
+            document.getElementById('auth-desc').textContent =
+                authData.detail || 'Complete the sign-in in your browser, then click below to check again.';
+            document.getElementById('btn-auth').textContent = 'Check Again';
+        }
+    } catch (e) {
+        console.error('Auth error:', e);
+        checking.style.display = 'none';
+        needsAuth.style.display = 'block';
+        document.getElementById('auth-title').textContent = 'Something went wrong';
+        document.getElementById('auth-desc').textContent = e.message || 'Please try again.';
+        document.getElementById('btn-auth').textContent = 'Try Again';
+    }
+}
+
+// ── API Key Provider Selection (Advanced fallback) ─────────
+
 function selectProvider(provider) {
     selectedProvider = provider;
-    
-    document.querySelectorAll('.provider-card').forEach(card => {
+
+    document.querySelectorAll('#api-key-fallback .provider-card').forEach(card => {
         card.classList.remove('selected');
     });
-    document.getElementById(`prov-${provider}`).classList.add('selected');
-    
-    // Update help panel
-    document.querySelectorAll('.help-content').forEach(el => {
-        el.style.display = 'none';
-    });
-    const helpEl = document.getElementById(`help-${provider}`);
-    if (helpEl) helpEl.style.display = 'block';
-    
-    // Clear API key field
+    const el = document.getElementById(`prov-${provider}`);
+    if (el) el.classList.add('selected');
+
     document.getElementById('api-key').value = '';
     document.getElementById('api-key').focus();
 }
 
-// Help toggle
-function toggleHelp(event) {
-    event.preventDefault();
-    const panel = document.getElementById('help-panel');
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-    
-    // Show correct provider help
-    document.querySelectorAll('.help-content').forEach(el => {
-        el.style.display = 'none';
-    });
-    const helpEl = document.getElementById(`help-${selectedProvider}`);
-    if (helpEl) helpEl.style.display = 'block';
-}
+// ── Bot Pool removed — customers create their own bot via BotFather ──
 
-// File import
+// ── File import ────────────────────────────────────────────
+
 function handleDragOver(event) {
     event.preventDefault();
     document.getElementById('drop-zone').classList.add('dragover');
@@ -227,50 +368,39 @@ function handleDragLeave(event) {
 function handleDrop(event) {
     event.preventDefault();
     document.getElementById('drop-zone').classList.remove('dragover');
-    
     const files = event.dataTransfer.files;
-    if (files.length > 0) {
-        processFile(files[0]);
-    }
+    if (files.length > 0) processFile(files[0]);
 }
 
 function handleFileSelect(event) {
     const files = event.target.files;
-    if (files.length > 0) {
-        processFile(files[0]);
-    }
+    if (files.length > 0) processFile(files[0]);
 }
 
 function processFile(file) {
     importedFile = file;
     const status = document.getElementById('import-status');
     status.style.display = 'block';
-    
     const sizeMB = (file.size / 1024 / 1024).toFixed(1);
-    
+
     if (file.name.endsWith('.json') || file.name.endsWith('.zip')) {
         status.className = 'import-status success';
-        status.innerHTML = `✅ <strong>${file.name}</strong> (${sizeMB}MB) — Ready to import!`;
+        status.innerHTML = `<strong>${file.name}</strong> (${sizeMB}MB) — Ready to import!`;
         config.imported_chats = true;
     } else {
         status.className = 'import-status error';
-        status.innerHTML = `❌ Unsupported file type. Please use .json or .zip exports.`;
+        status.innerHTML = `Unsupported file type. Please use .json or .zip exports.`;
         importedFile = null;
     }
 }
 
 async function uploadAndImport() {
-    /**
-     * Upload the selected file to /api/import, show progress,
-     * then display a summary of what was imported.
-     */
-    if (!importedFile) return true; // Nothing to upload, allow proceed
+    if (!importedFile) return true;
 
     const status = document.getElementById('import-status');
     const dropZone = document.getElementById('drop-zone');
     const step4Buttons = document.querySelector('#step-4 .btn-row');
 
-    // --- Phase 1: Uploading / Processing ---
     dropZone.style.display = 'none';
     status.style.display = 'block';
     status.className = 'import-status processing';
@@ -283,7 +413,6 @@ async function uploadAndImport() {
             </div>
         </div>
     `;
-    // Disable buttons while processing
     step4Buttons.querySelectorAll('button').forEach(b => b.disabled = true);
 
     try {
@@ -294,14 +423,10 @@ async function uploadAndImport() {
             method: 'POST',
             body: formData,
         });
-
         const result = await response.json();
 
-        if (!response.ok) {
-            throw new Error(result.error || 'Import failed');
-        }
+        if (!response.ok) throw new Error(result.error || 'Import failed');
 
-        // --- Phase 2: Show summary ---
         const convCount = (result.conversations || 0).toLocaleString();
         const msgCount = (result.messages || 0).toLocaleString();
         const factCount = result.facts_count || 0;
@@ -330,7 +455,6 @@ async function uploadAndImport() {
                 <p class="summary-source">Imported from ${source}</p>
         `;
 
-        // Show a few sample facts
         if (result.facts && result.facts.length > 0) {
             summaryHTML += `<div class="summary-facts"><p class="facts-label">Things I learned about you:</p><ul>`;
             const factsToShow = result.facts.slice(0, 5);
@@ -344,22 +468,18 @@ async function uploadAndImport() {
         }
 
         summaryHTML += `</div>`;
-
         status.className = 'import-status imported';
         status.innerHTML = summaryHTML;
-
         config.imported_chats = true;
         config.import_source = result.source;
 
     } catch (error) {
         console.error('Import error:', error);
         status.className = 'import-status error';
-        status.innerHTML = `❌ Import failed: ${_escapeHtml(error.message)}<br><button class="btn-outline btn-retry" onclick="retryImport()">Try again</button>`;
-        // Re-show drop zone
+        status.innerHTML = `Import failed: ${_escapeHtml(error.message)}<br><button class="btn-outline btn-retry" onclick="retryImport()">Try again</button>`;
         dropZone.style.display = '';
     }
 
-    // Re-enable buttons
     step4Buttons.querySelectorAll('button').forEach(b => b.disabled = false);
     return true;
 }
@@ -389,43 +509,58 @@ function _escapeHtml(str) {
     return div.innerHTML;
 }
 
-function skipImport() {
+async function skipImport() {
     config.imported_chats = false;
     importedFile = null;
+    await saveConfigAndStartEngine(); // Ensure config is saved even if step 3 save failed
     showStep(5);
-    finish(); // Auto-trigger setup when entering final step
+    finish();
 }
 
-// Finish — called when Step 5 is shown
-async function finish() {
+// ── Config Save (after step 3 — all essentials collected) ─────
+
+let configSaved = false;
+
+async function saveConfigAndStartEngine() {
+    if (configSaved) return;
     config.setup_complete = true;
-    
-    // Show loading state
+
+    try {
+        const encoded = btoa(JSON.stringify(config));
+        const response = await fetch(`/api/config?data=${encodeURIComponent(encoded)}`);
+        if (!response.ok) throw new Error('Failed to save config');
+        configSaved = true;
+        console.log('Config saved + engine starting (after step 3)');
+    } catch (error) {
+        console.error('Error saving config:', error);
+        localStorage.setItem('kiyomi-config', JSON.stringify(config));
+    }
+}
+
+// ── Finish ─────────────────────────────────────────────────
+
+async function finish() {
+    // Save again to capture any import data from step 4
+    config.setup_complete = true;
+    try {
+        const encoded = btoa(JSON.stringify(config));
+        const response = await fetch(`/api/config?data=${encodeURIComponent(encoded)}`);
+        if (!response.ok) throw new Error('Failed to save config');
+        console.log('Final config saved');
+    } catch (error) {
+        console.error('Error saving final config:', error);
+    }
+
     const loading = document.getElementById('done-loading');
     const ready = document.getElementById('done-ready');
     const subtitle = document.getElementById('done-subtitle');
     if (loading) loading.style.display = 'block';
     if (ready) ready.style.display = 'none';
-    
-    try {
-        // Save config
-        const encoded = btoa(JSON.stringify(config));
-        const response = await fetch(`/api/config?data=${encodeURIComponent(encoded)}`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to save config');
-        }
-        
-        console.log('Config saved successfully!');
-    } catch (error) {
-        console.error('Error saving config:', error);
-        localStorage.setItem('kiyomi-config', JSON.stringify(config));
-    }
-    
-    // Get bot username via Telegram API
+
+    // Get bot username from Telegram API
     const token = config.telegram_token;
     let botUsername = '';
-    
+
     if (token) {
         try {
             const resp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
@@ -437,36 +572,28 @@ async function finish() {
             console.log('Could not fetch bot info:', e);
         }
     }
-    
-    // Wait for engine to start (deps install + boot)
-    if (subtitle) subtitle.textContent = 'Installing AI packages (first time only, about 30 seconds)...';
-    
-    // Poll for engine readiness (check every 5 seconds for up to 2 minutes)
+
+    if (subtitle) subtitle.textContent = 'Starting your assistant...';
+
+    // Poll for engine readiness (engine already started after step 3)
     let engineReady = false;
-    for (let i = 0; i < 24; i++) {
-        await new Promise(r => setTimeout(r, 5000));
+    for (let i = 0; i < 12; i++) {
+        await new Promise(r => setTimeout(r, 3000));
         try {
             if (token) {
                 const resp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
                 const data = await resp.json();
-                if (data.ok) {
-                    engineReady = true;
-                    break;
-                }
+                if (data.ok) { engineReady = true; break; }
             }
         } catch (e) {}
-        
-        // Update loading message
+
         if (i === 3 && subtitle) subtitle.textContent = 'Almost there — setting up your AI brain...';
-        if (i === 8 && subtitle) subtitle.textContent = 'Still working — this only happens once...';
     }
-    
-    // Show ready state
+
     if (loading) loading.style.display = 'none';
     if (ready) ready.style.display = 'block';
     if (subtitle) subtitle.textContent = "I'm running and ready to help!";
-    
-    // Set up the deep link
+
     const deepLink = document.getElementById('bot-deep-link');
     if (deepLink && botUsername) {
         deepLink.href = `https://t.me/${botUsername}`;

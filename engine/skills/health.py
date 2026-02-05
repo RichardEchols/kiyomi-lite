@@ -197,9 +197,14 @@ class HealthSkill(Skill):
                 med_names = re.split(r'\s+and\s+|\s*&\s*|\s*,\s*', raw_name)
                 for name in med_names:
                     name = re.sub(r'^(?:and|the|my)\s+', '', name.strip(), flags=re.IGNORECASE).strip()
-                    # Filter: skip if empty, too long, or any word is a false positive
-                    name_words = set(name.lower().split())
-                    if name and len(name) < 40 and not (name_words & MED_FALSE_POSITIVES):
+                    # Strip trailing time-of-day / filler words from the extracted name
+                    name = re.sub(
+                        r'\s+(?:this|in the|every|today|tonight|last)?\s*'
+                        r'(?:morning|evening|night|afternoon|daily|tonight)\b.*$',
+                        '', name, flags=re.IGNORECASE,
+                    ).strip()
+                    # Filter: skip if empty, too long, or entire name is a false positive
+                    if name and len(name) < 40 and name.lower() not in MED_FALSE_POSITIVES:
                         entries.append({
                             "category": "medications",
                             "entry": {

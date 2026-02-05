@@ -26,105 +26,81 @@
         <div class="step" id="step-2">
             <div class="card">
                 <div class="emoji-large">🧠</div>
-                <h1>Give Kiyomi a Brain</h1>
-                <p class="subtitle">Kiyomi needs an AI to think with. We recommend <strong>Google Gemini</strong> — it's completely free!</p>
-                
-                <div class="provider-grid">
-                    <div class="provider-card selected" onclick="selectProvider('gemini')" id="prov-gemini">
-                        <div class="provider-icon">✨</div>
-                        <div class="provider-name">Google Gemini</div>
-                        <div class="provider-tag free">Free ⭐ Recommended</div>
-                    </div>
-                    <div class="provider-card" onclick="selectProvider('anthropic')" id="prov-anthropic">
+                <h1>Connect Your AI</h1>
+                <p class="subtitle">Kiyomi works with your existing AI subscription — no extra costs, no API keys.</p>
+
+                <!-- Subscription picker -->
+                <div class="provider-grid" id="sub-grid">
+                    <div class="provider-card" onclick="selectSubscription('claude')" id="sub-claude">
                         <div class="provider-icon">🤖</div>
                         <div class="provider-name">Claude</div>
-                        <div class="provider-tag">Paid</div>
+                        <div class="provider-tag">Pro / Max · $20/mo</div>
                     </div>
-                    <div class="provider-card" onclick="selectProvider('openai')" id="prov-openai">
+                    <div class="provider-card" onclick="selectSubscription('codex')" id="sub-codex">
                         <div class="provider-icon">💬</div>
                         <div class="provider-name">ChatGPT</div>
-                        <div class="provider-tag">Paid</div>
+                        <div class="provider-tag">Plus · $20/mo</div>
+                    </div>
+                    <div class="provider-card" onclick="selectSubscription('gemini')" id="sub-gemini">
+                        <div class="provider-icon">✨</div>
+                        <div class="provider-name">Gemini</div>
+                        <div class="provider-tag">Google One AI · $20/mo</div>
                     </div>
                 </div>
 
-                <div class="walkthrough-box" id="walkthrough-box">
-                    <div id="help-gemini" class="help-content">
-                        <p class="walkthrough-title">📋 How to get your free Gemini connection code:</p>
-                        <div class="walkthrough-steps">
-                            <div class="wt-step">
-                                <span class="wt-num">1</span>
-                                <div>
-                                    <p>Click the button below to open Google AI Studio (sign in with your Google account if asked)</p>
-                                    <a href="https://aistudio.google.com/apikey" target="_blank" class="btn-action">Open Google AI Studio →</a>
-                                </div>
-                            </div>
-                            <div class="wt-step">
-                                <span class="wt-num">2</span>
-                                <p>Click the blue <strong>"Create API Key"</strong> button</p>
-                            </div>
-                            <div class="wt-step">
-                                <span class="wt-num">3</span>
-                                <p>A key will appear — click <strong>"Copy"</strong> next to it</p>
-                            </div>
-                            <div class="wt-step">
-                                <span class="wt-num">4</span>
-                                <p>Come back here and paste it in the box below</p>
+                <!-- Connection status panel -->
+                <div id="connect-panel" class="walkthrough-box" style="display:none;">
+                    <div id="connect-checking" style="display:none;">
+                        <div class="import-progress">
+                            <div class="spinner"></div>
+                            <div>
+                                <strong id="connect-action">Checking...</strong>
+                                <p class="progress-hint" id="connect-hint">This may open your browser to sign in.</p>
                             </div>
                         </div>
-                        <p class="walkthrough-note">✅ No credit card needed. No cost. Takes 30 seconds.</p>
                     </div>
-                    <div id="help-anthropic" class="help-content" style="display:none;">
-                        <p class="walkthrough-title">📋 How to get your Claude connection code:</p>
-                        <div class="walkthrough-steps">
-                            <div class="wt-step">
-                                <span class="wt-num">1</span>
-                                <div>
-                                    <p>Click below to open the Anthropic console (create an account if you don't have one)</p>
-                                    <a href="https://console.anthropic.com/keys" target="_blank" class="btn-action">Open Anthropic Console →</a>
-                                </div>
-                            </div>
-                            <div class="wt-step">
-                                <span class="wt-num">2</span>
-                                <p>Click <strong>"Create Key"</strong>, give it any name, then click <strong>Create</strong></p>
-                            </div>
-                            <div class="wt-step">
-                                <span class="wt-num">3</span>
-                                <p>Copy the key and paste it below</p>
-                            </div>
-                        </div>
-                        <p class="walkthrough-note">💳 Requires a paid Anthropic account with API credits.</p>
+                    <div id="connect-ready" style="display:none;">
+                        <p class="walkthrough-note" id="connect-result"></p>
+                        <p id="connect-account" style="margin:4px 0 0; font-size:13px; color:var(--text-secondary);"></p>
+                        <button class="btn-outline" id="btn-switch-account" onclick="switchAccount()" style="display:none; margin-top:8px; font-size:12px;">Not your account? Sign in with a different one</button>
                     </div>
-                    <div id="help-openai" class="help-content" style="display:none;">
-                        <p class="walkthrough-title">📋 How to get your ChatGPT connection code:</p>
-                        <div class="walkthrough-steps">
-                            <div class="wt-step">
-                                <span class="wt-num">1</span>
-                                <div>
-                                    <p>Click below to open the OpenAI dashboard (sign in with your OpenAI account)</p>
-                                    <a href="https://platform.openai.com/api-keys" target="_blank" class="btn-action">Open OpenAI Dashboard →</a>
-                                </div>
-                            </div>
-                            <div class="wt-step">
-                                <span class="wt-num">2</span>
-                                <p>Click <strong>"Create new secret key"</strong>, give it any name, then click <strong>Create</strong></p>
-                            </div>
-                            <div class="wt-step">
-                                <span class="wt-num">3</span>
-                                <p>Copy the key and paste it below</p>
-                            </div>
-                        </div>
-                        <p class="walkthrough-note">💳 Requires a paid OpenAI account with API credits.</p>
+                    <div id="connect-needs-auth" style="display:none;">
+                        <p class="walkthrough-title" id="auth-title">Sign in to connect</p>
+                        <p style="margin-bottom:12px; font-size:14px; color:var(--text-secondary);" id="auth-desc">
+                            Click below to sign in with your subscription account. A browser window will open.
+                        </p>
+                        <button class="btn-action" onclick="triggerAuth()" id="btn-auth">Sign In</button>
                     </div>
                 </div>
 
-                <div class="input-group" id="key-group">
-                    <label for="api-key">Paste your connection code here:</label>
-                    <input type="password" id="api-key" placeholder="It will look like: AIzaSy... or sk-...">
-                </div>
-                
-                <div class="btn-row">
+                <!-- Advanced: API key fallback (collapsed) -->
+                <details id="api-key-fallback" style="margin-top: 16px;">
+                    <summary style="cursor:pointer; color: var(--text-hint); font-size: 13px;">Advanced: Use an API key instead</summary>
+                    <div style="margin-top: 12px;">
+                        <div class="provider-grid" style="margin-bottom: 12px;">
+                            <div class="provider-card" onclick="selectProvider('gemini')" id="prov-gemini" style="padding: 12px 8px;">
+                                <div class="provider-name" style="font-size: 13px;">Gemini</div>
+                                <div class="provider-tag free" style="font-size: 10px;">Free</div>
+                            </div>
+                            <div class="provider-card" onclick="selectProvider('anthropic')" id="prov-anthropic" style="padding: 12px 8px;">
+                                <div class="provider-name" style="font-size: 13px;">Claude</div>
+                                <div class="provider-tag" style="font-size: 10px;">Paid</div>
+                            </div>
+                            <div class="provider-card" onclick="selectProvider('openai')" id="prov-openai" style="padding: 12px 8px;">
+                                <div class="provider-name" style="font-size: 13px;">ChatGPT</div>
+                                <div class="provider-tag" style="font-size: 10px;">Paid</div>
+                            </div>
+                        </div>
+                        <div class="input-group" id="key-group">
+                            <label for="api-key">Paste your API key:</label>
+                            <input type="password" id="api-key" placeholder="AIzaSy... or sk-...">
+                        </div>
+                    </div>
+                </details>
+
+                <div class="btn-row" style="margin-top: 16px;">
                     <button class="btn-secondary" onclick="prevStep(2)">Back</button>
-                    <button class="btn-primary" onclick="nextStep(2)">Continue</button>
+                    <button class="btn-primary" onclick="nextStep(2)" id="btn-step2">Continue</button>
                 </div>
             </div>
         </div>
@@ -134,83 +110,53 @@
             <div class="card">
                 <div class="emoji-large">💬</div>
                 <h1>Connect Telegram</h1>
-                <p class="subtitle">Kiyomi lives in Telegram — you'll message her just like texting a friend. Works on your phone, computer, tablet, anywhere.</p>
-                
-                <div class="walkthrough-box">
-                    <p class="walkthrough-title">📋 Let's set this up (takes about 2 minutes):</p>
+                <p class="subtitle">Kiyomi lives in Telegram — message her like texting a friend. Takes about 60 seconds.</p>
 
-                    <div class="walkthrough-steps">
-                        <div class="wt-step">
-                            <span class="wt-num">1</span>
-                            <div>
-                                <p><strong>First — do you have Telegram?</strong></p>
-                                <p class="wt-hint">If not, download it free. It's like iMessage but works everywhere.</p>
-                                <div class="wt-buttons">
-                                    <a href="https://apps.apple.com/app/telegram-messenger/id686449807" target="_blank" class="btn-action btn-small">iPhone / iPad</a>
-                                    <a href="https://play.google.com/store/apps/details?id=org.telegram.messenger" target="_blank" class="btn-action btn-small">Android</a>
-                                    <a href="https://desktop.telegram.org" target="_blank" class="btn-action btn-small">Mac / PC</a>
+                <div id="tg-manual">
+                    <div class="walkthrough-box">
+                        <p class="walkthrough-title">Create your personal bot:</p>
+                        <div class="walkthrough-steps">
+                            <div class="wt-step">
+                                <span class="wt-num">1</span>
+                                <div>
+                                    <p><strong>Get Telegram</strong> if you don't have it:</p>
+                                    <div class="wt-buttons">
+                                        <a href="https://apps.apple.com/app/telegram-messenger/id686449807" target="_blank" class="btn-action btn-small">iPhone / iPad</a>
+                                        <a href="https://play.google.com/store/apps/details?id=org.telegram.messenger" target="_blank" class="btn-action btn-small">Android</a>
+                                        <a href="https://desktop.telegram.org" target="_blank" class="btn-action btn-small">Mac / PC</a>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-
-                        <div class="wt-step">
-                            <span class="wt-num">2</span>
-                            <div>
-                                <p><strong>Open this link to talk to "BotFather"</strong> (he creates bots on Telegram)</p>
-                                <a href="https://t.me/BotFather" target="_blank" class="btn-action">Open BotFather in Telegram →</a>
-                            </div>
-                        </div>
-
-                        <div class="wt-step">
-                            <span class="wt-num">3</span>
-                            <div>
-                                <p><strong>Send this exact message</strong> to BotFather:</p>
-                                <div class="copy-box" onclick="copyText('/newbot', this)">
-                                    <code>/newbot</code>
-                                    <span class="copy-hint">Click to copy</span>
+                            <div class="wt-step">
+                                <span class="wt-num">2</span>
+                                <div>
+                                    <p><strong>Open BotFather</strong> in Telegram:</p>
+                                    <a href="https://t.me/BotFather" target="_blank" class="btn-action">Open @BotFather →</a>
                                 </div>
                             </div>
-                        </div>
-
-                        <div class="wt-step">
-                            <span class="wt-num">4</span>
-                            <div>
-                                <p><strong>BotFather will ask for a name.</strong> Type any name you want!</p>
-                                <p class="wt-hint">This is what your assistant will be called. Examples: "Kiyomi", "My Assistant", "SarAI", "Helper" — anything you like.</p>
-                            </div>
-                        </div>
-
-                        <div class="wt-step">
-                            <span class="wt-num">5</span>
-                            <div>
-                                <p><strong>BotFather will ask for a username.</strong> Type something unique, like:</p>
-                                <div class="copy-box" onclick="copyText('kiyomi_' + Math.random().toString(36).substr(2, 5) + '_bot', this)">
-                                    <code id="suggested-username">kiyomi_xxxxx_bot</code>
-                                    <span class="copy-hint">Click to copy</span>
+                            <div class="wt-step">
+                                <span class="wt-num">3</span>
+                                <div>
+                                    <p>Send <strong>/newbot</strong>, pick any name, pick a username ending in "bot"</p>
                                 </div>
-                                <p class="wt-hint">Must end in "bot" — the one above is randomly generated for you.</p>
                             </div>
-                        </div>
-
-                        <div class="wt-step">
-                            <span class="wt-num">6</span>
-                            <div>
-                                <p><strong>BotFather will send you a token</strong> — it looks like this:</p>
-                                <p class="token-example">123456789:ABCdefGhIjKlMnOpQrStUvWxYz</p>
-                                <p><strong>Copy that token</strong> and paste it below 👇</p>
+                            <div class="wt-step">
+                                <span class="wt-num">4</span>
+                                <div>
+                                    <p><strong>Paste the token</strong> BotFather gives you:</p>
+                                </div>
                             </div>
                         </div>
                     </div>
+                    <div class="input-group">
+                        <label for="tg-token">Bot token:</label>
+                        <input type="text" id="tg-token" placeholder="123456789:ABCdefGhIjKlMnOpQrStUvWxYz">
+                    </div>
                 </div>
 
-                <div class="input-group">
-                    <label for="tg-token">Paste your bot token here:</label>
-                    <input type="text" id="tg-token" placeholder="123456789:ABCdefGhIjKlMnOpQrStUvWxYz">
-                </div>
-                
-                <div class="btn-row">
+                <div class="btn-row" style="margin-top: 16px;">
                     <button class="btn-secondary" onclick="prevStep(3)">Back</button>
-                    <button class="btn-primary" onclick="nextStep(3)">Continue</button>
+                    <button class="btn-primary" onclick="nextStep(3)" id="btn-step3">Continue</button>
                 </div>
             </div>
         </div>

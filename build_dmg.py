@@ -30,6 +30,11 @@ ICON_FILE = "resources/icon.icns"       # Will be created as placeholder
 DIST_DIR = Path("dist")
 BUILD_DIR = Path("build")
 DMG_NAME = f"{APP_NAME}-{VERSION}.dmg"
+SPEC_FILE = Path(f"{APP_NAME}.spec")
+
+# Code signing identity (Developer ID Application)
+SIGN_IDENTITY = "Developer ID Application: RICHARD BLAKE BRAXTON ECHOLS (Q869GZWBB9)"
+TEAM_ID = "Q869GZWBB9"
 
 # Directories to bundle as data (relative to project root)
 DATA_DIRS = [
@@ -63,6 +68,16 @@ HIDDEN_IMPORTS = [
     "email.mime",
     "email.mime.text",
     "email.mime.multipart",
+]
+
+# Collect all submodules for dynamic-import heavy packages
+COLLECT_SUBMODULES = [
+    "telegram",
+    "openai",
+    "anthropic",
+    "google.generativeai",
+    "rumps",
+    "docx",
 ]
 
 # -------------------------------------------------------------------
@@ -151,32 +166,28 @@ def clean():
         if d.exists():
             shutil.rmtree(d)
             print(f"  Removed {d}/")
-    spec = Path(f"{APP_NAME}.spec")
-    if spec.exists():
-        spec.unlink()
-        print(f"  Removed {spec}")
+    if SPEC_FILE.exists():
+        SPEC_FILE.unlink()
+        print(f"  Removed {SPEC_FILE}")
 
 
-def build_app():
-    """Build Kiyomi.app with PyInstaller."""
-    print("\n📦 Building Kiyomi.app with PyInstaller...")
+def build_spec():
+    """Generate PyInstaller spec with required hidden imports."""
+    print("\n🧩 Generating PyInstaller spec...")
     ensure_pyinstaller()
     ensure_icon()
 
-    # Assemble PyInstaller args
-    args = [
-        sys.executable, "-m", "PyInstaller",
-        "--name", APP_NAME,
-        "--windowed",                    # .app bundle (no terminal)
-        "--onedir",                      # faster startup than onefile
-        "--noconfirm",
-        "--clean",
-        f"--osx-bundle-identifier={BUNDLE_ID}",
-    ]
+    if SPEC_FILE.exists():
+        SPEC_FILE.unlink()
 
-    # Target architecture
-    if platform.machine() == "arm64":
-        args.extend(["--target-architecture", "arm64"])
+    args = [
+        sys.executable, "-m", "PyInstaller.utils.cliutils.makespec",
+        "--name", APP_NAME,
+        "--windowed",
+        "--onedir",
+        f"--osx-bundle-identifier={BUNDLE_ID}",
+        "--specpath", ".",
+    ]
 
     # Icon
     if ICON_FILE and Path(ICON_FILE).exists():
@@ -198,8 +209,35 @@ def build_app():
     for imp in HIDDEN_IMPORTS:
         args.extend(["--hidden-import", imp])
 
+    for pkg in COLLECT_SUBMODULES:
+        args.extend(["--collect-submodules", pkg])
+
     # Entry point
     args.append(ENTRY_POINT)
+
+    run(args)
+
+    if not SPEC_FILE.exists():
+        print(f"  ✗ Spec generation failed — {SPEC_FILE} not found")
+        sys.exit(1)
+
+    print(f"  ✓ Spec created: {SPEC_FILE}")
+    return SPEC_FILE
+
+
+def build_app():
+    """Build Kiyomi.app with PyInstaller."""
+    print("\n📦 Building Kiyomi.app with PyInstaller...")
+    spec_path = build_spec()
+
+    # Assemble PyInstaller args (build from spec)
+    args = [
+        sys.executable, "-m", "PyInstaller",
+        "--noconfirm",
+        "--clean",
+    ]
+
+    args.append(str(spec_path))
 
     run(args)
 
@@ -282,6 +320,88 @@ def build_dmg(app_path: Path):
     return dmg_output
 
 
+def codesign_app(app_path: Path) -> bool:
+    """Sign the .app bundle with Developer ID for Gatekeeper."""
+    print(f"\n🔏 Code signing {app_path.name}...")
+
+    # Check if identity is available
+    result = subprocess.run(
+        ["security", "find-identity", "-v", "-p", "codesigning"],
+        capture_output=True, text=True,
+    )
+    if SIGN_IDENTITY not in result.stdout:
+        print(f"  ⚠ Signing identity not found: {SIGN_IDENTITY}")
+        print(f"  Skipping code signing. App will show Gatekeeper warning.")
+        return False
+
+    # Deep sign the app bundle (signs all nested frameworks/binaries)
+    sign_cmd = [
+        "codesign", "--deep", "--force", "--verify", "--verbose",
+        "--timestamp", "--options", "runtime",
+        "--sign", SIGN_IDENTITY,
+        str(app_path),
+    ]
+    print(f"  → codesign --deep --sign \"{SIGN_IDENTITY[:50]}...\"")
+    result = subprocess.run(sign_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  ⚠ Code signing failed: {result.stderr[:300]}")
+        return False
+
+    # Verify
+    verify = subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(app_path)],
+        capture_output=True, text=True,
+    )
+    if verify.returncode == 0:
+        print(f"  ✅ Code signed and verified")
+        return True
+    else:
+        print(f"  ⚠ Verification failed: {verify.stderr[:200]}")
+        return False
+
+
+def notarize_dmg(dmg_path: Path) -> bool:
+    """Submit DMG for Apple notarization (requires app-specific password).
+
+    Set NOTARY_PASSWORD env var or pass --notary-password on CLI.
+    Generate at: https://appleid.apple.com/account/manage → App-Specific Passwords
+    """
+    apple_id = os.environ.get("APPLE_ID", "richardbechols92@gmail.com")
+    password = os.environ.get("NOTARY_PASSWORD", "")
+
+    if not password:
+        print(f"\n📋 Notarization skipped (no NOTARY_PASSWORD set)")
+        print(f"   To notarize, run:")
+        print(f"   NOTARY_PASSWORD=xxxx-xxxx-xxxx-xxxx python3 build_dmg.py --clean")
+        print(f"   Generate password at: https://appleid.apple.com/account/manage")
+        return False
+
+    print(f"\n📋 Submitting for notarization...")
+    submit = subprocess.run([
+        "xcrun", "notarytool", "submit", str(dmg_path),
+        "--apple-id", apple_id,
+        "--team-id", TEAM_ID,
+        "--password", password,
+        "--wait",
+    ], capture_output=True, text=True, timeout=600)
+
+    if submit.returncode == 0:
+        print(f"  ✅ Notarization accepted")
+        # Staple the ticket
+        staple = subprocess.run(
+            ["xcrun", "stapler", "staple", str(dmg_path)],
+            capture_output=True, text=True,
+        )
+        if staple.returncode == 0:
+            print(f"  ✅ Ticket stapled to DMG")
+        else:
+            print(f"  ⚠ Stapling failed: {staple.stderr[:200]}")
+        return True
+    else:
+        print(f"  ⚠ Notarization failed: {submit.stderr[:300]}")
+        return False
+
+
 # -------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------
@@ -291,6 +411,7 @@ def main():
     parser.add_argument("--app", action="store_true", help="Build .app only (skip dmg)")
     parser.add_argument("--clean", action="store_true", help="Clean build artifacts before building")
     parser.add_argument("--clean-only", action="store_true", help="Just clean, don't build")
+    parser.add_argument("--no-sign", action="store_true", help="Skip code signing")
     args = parser.parse_args()
 
     print(f"🌸 Kiyomi Build Script v{VERSION}")
@@ -308,13 +429,24 @@ def main():
 
     app_path = build_app()
 
+    # Code sign
+    signed = False
+    if not args.no_sign:
+        signed = codesign_app(app_path)
+
     if not args.app:
-        build_dmg(app_path)
+        dmg_path = build_dmg(app_path)
+
+        # Notarize if signed and password available
+        if signed:
+            notarize_dmg(dmg_path)
 
     print(f"\n🎉 Build complete!")
     print(f"   App:  dist/{APP_NAME}.app")
     if not args.app:
         print(f"   DMG:  dist/{DMG_NAME}")
+    if not signed:
+        print(f"   ⚠  Not code-signed (Gatekeeper will warn on other Macs)")
 
 
 if __name__ == "__main__":

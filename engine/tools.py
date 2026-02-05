@@ -125,52 +125,6 @@ TOOLS = [
         },
     },
     {
-        "name": "check_calendar",
-        "description": (
-            "Check today's calendar events and schedule. Use when user asks about their "
-            "schedule, what's on their calendar, what they have today, or upcoming events."
-        ),
-        "parameters": {
-            "days": {
-                "type": "integer",
-                "description": "Number of days to look ahead. 0 or 1 = today only (default). Use 7 for this week.",
-            },
-        },
-    },
-    {
-        "name": "create_event",
-        "description": (
-            "Create a new calendar event. Use when user asks to schedule something, "
-            "add an event, book time, or set an appointment."
-        ),
-        "parameters": {
-            "title": {"type": "string", "description": "Event title (e.g., 'Dentist Appointment')"},
-            "start": {
-                "type": "string",
-                "description": "Start time in ISO format: 'YYYY-MM-DDTHH:MM:SS' for timed events or 'YYYY-MM-DD' for all-day",
-            },
-            "end": {
-                "type": "string",
-                "description": "End time in ISO format: 'YYYY-MM-DDTHH:MM:SS' for timed events or 'YYYY-MM-DD' for all-day",
-            },
-            "description": {"type": "string", "description": "Optional event description or notes"},
-            "location": {"type": "string", "description": "Optional event location"},
-        },
-    },
-    {
-        "name": "find_free_time",
-        "description": (
-            "Find open time slots on a given day. Use when user asks when they're free, "
-            "wants to find time for something, or asks about availability."
-        ),
-        "parameters": {
-            "date": {
-                "type": "string",
-                "description": "Date to check in YYYY-MM-DD format. Defaults to today if empty.",
-            },
-        },
-    },
-    {
         "name": "check_spending",
         "description": (
             "Check spending summary from the user's connected bank account. "
@@ -756,7 +710,7 @@ def analyze_image(image_path: str, question: str = "") -> str:
             media_type = media_map.get(suffix, "image/jpeg")
 
             response = client.chat.completions.create(
-                model="gpt-5.2",
+                model="gpt-4o",
                 max_tokens=1024,
                 messages=[{
                     "role": "user",
@@ -840,74 +794,6 @@ def check_category_spending(category: str, days: int = 30) -> str:
         return f"Error checking category spending: {e}"
 
 
-# ============================================================
-# Calendar tools
-# ============================================================
-
-
-def check_calendar(days: int = 0) -> str:
-    """Get calendar events — today or upcoming N days."""
-    try:
-        from calendar_integration import (
-            get_todays_events,
-            get_upcoming_events,
-            is_calendar_configured,
-        )
-
-        if not is_calendar_configured():
-            return (
-                "Google Calendar not connected yet. The user needs to set up "
-                "Google Calendar OAuth — run setup_calendar() or add credentials "
-                "to ~/.kiyomi/google_credentials.json"
-            )
-
-        if days <= 1:
-            return get_todays_events()
-        else:
-            return get_upcoming_events(days)
-    except ImportError:
-        return "Calendar integration not available. Install: pip install google-auth google-auth-oauthlib google-api-python-client"
-    except Exception as e:
-        return f"Error checking calendar: {type(e).__name__}: {str(e)[:200]}"
-
-
-def create_calendar_event(
-    title: str, start: str, end: str, description: str = "", location: str = ""
-) -> str:
-    """Create a new calendar event."""
-    try:
-        from calendar_integration import create_event, is_calendar_configured
-
-        if not is_calendar_configured():
-            return (
-                "Google Calendar not connected yet. The user needs to set up "
-                "Google Calendar OAuth first."
-            )
-
-        return create_event(title, start, end, description, location)
-    except ImportError:
-        return "Calendar integration not available. Install: pip install google-auth google-auth-oauthlib google-api-python-client"
-    except Exception as e:
-        return f"Error creating event: {type(e).__name__}: {str(e)[:200]}"
-
-
-def find_free_time_tool(date: str = "") -> str:
-    """Find free time slots on a given day."""
-    try:
-        from calendar_integration import find_free_time, is_calendar_configured
-
-        if not is_calendar_configured():
-            return (
-                "Google Calendar not connected yet. The user needs to set up "
-                "Google Calendar OAuth first."
-            )
-
-        return find_free_time(date)
-    except ImportError:
-        return "Calendar integration not available. Install: pip install google-auth google-auth-oauthlib google-api-python-client"
-    except Exception as e:
-        return f"Error finding free time: {type(e).__name__}: {str(e)[:200]}"
-
 
 _TOOL_FUNCS = {
     "web_search": web_search,
@@ -921,9 +807,6 @@ _TOOL_FUNCS = {
     "check_spending": check_spending,
     "check_balances": check_balances,
     "check_category_spending": check_category_spending,
-    "check_calendar": check_calendar,
-    "create_event": create_calendar_event,
-    "find_free_time": find_free_time_tool,
 }
 
 
@@ -972,19 +855,6 @@ def execute_tool(name: str, args: dict[str, Any] | None) -> str:
                 str(args.get("category", "Food and Drink")),
                 int(args.get("days", 30)),
             )
-        if name == "check_calendar":
-            days = int(args.get("days", 0))
-            return check_calendar(days)
-        if name == "create_event":
-            return create_calendar_event(
-                str(args.get("title", "")),
-                str(args.get("start", "")),
-                str(args.get("end", "")),
-                str(args.get("description", "")),
-                str(args.get("location", "")),
-            )
-        if name == "find_free_time":
-            return find_free_time_tool(str(args.get("date", "")))
         return "Error: tool dispatch fell through."
     except Exception as e:
         return f"Error: tool '{name}' failed: {type(e).__name__}: {str(e)[:200]}"
@@ -996,9 +866,6 @@ _OPTIONAL_PARAMS = {
     "check_spending": {"days"},
     "check_balances": set(),  # no params needed
     "check_category_spending": {"days"},
-    "check_calendar": {"days"},
-    "create_event": {"description", "location"},
-    "find_free_time": {"date"},
 }
 
 

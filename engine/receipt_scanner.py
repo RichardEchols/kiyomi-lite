@@ -308,7 +308,7 @@ def _scan_openai(image_bytes: bytes, suffix: str, config: dict) -> str:
     media_type = media_map.get(suffix.lower(), "image/jpeg")
 
     response = client.chat.completions.create(
-        model="gpt-5.2",
+        model="gpt-4o",
         max_tokens=2048,
         messages=[{
             "role": "user",

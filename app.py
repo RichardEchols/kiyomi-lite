@@ -69,13 +69,23 @@ engine_process = None
 
 
 def is_setup_complete() -> bool:
-    """Check if initial setup has been done."""
+    """Check if initial setup has been done with minimum required fields.
+
+    Returns True only if config exists, setup_complete is True,
+    AND the essential fields (provider + telegram token) are present.
+    This prevents partial configs from skipping onboarding.
+    """
     if not CONFIG_FILE.exists():
         return False
     try:
         with open(CONFIG_FILE) as f:
             config = json.load(f)
-        return config.get("setup_complete", False)
+        if not config.get("setup_complete", False):
+            return False
+        # Must have at least a provider and telegram token
+        has_provider = bool(config.get("provider") or config.get("subscription"))
+        has_telegram = bool(config.get("telegram_token"))
+        return has_provider and has_telegram
     except Exception:
         return False
 
@@ -91,6 +101,27 @@ def load_config() -> dict:
 _engine_thread = None
 _engine_retries = 0
 _MAX_ENGINE_RETRIES = 3
+
+
+def _restart_process():
+    """Restart the current process to pick up new config."""
+    try:
+        _dbg("Restarting app to apply config changes...")
+        exe = sys.executable
+        argv = sys.argv[:] if sys.argv else [exe]
+        # Avoid duplicating the executable in argv.
+        if argv and argv[0] == exe:
+            args = [exe] + argv[1:]
+        else:
+            args = [exe] + argv
+        os.execv(exe, args)
+    except Exception as e:
+        _dbg(f"Restart failed: {type(e).__name__}: {e}")
+        # Fall back to starting engine without restart.
+        try:
+            start_engine()
+        except Exception:
+            pass
 
 
 def start_engine():
@@ -231,6 +262,36 @@ class OnboardingHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         
+        # API: Bot pool status (how many pre-made bots available)
+        if path == "/api/telegram/pool":
+            try:
+                sys.path.insert(0, str(ENGINE_DIR.parent))
+                from engine.bot_pool import get_pool_status, has_available_bots
+                status = get_pool_status()
+                status["has_bots"] = has_available_bots()
+                self._send_json(200, status)
+            except Exception as e:
+                logger.error(f"Bot pool status error: {e}")
+                self._send_json(200, {"has_bots": False, "total": 0, "available": 0, "claimed": 0})
+            return
+
+        # API: CLI status (detect installed + authenticated CLIs)
+        if path == "/api/cli/status":
+            try:
+                sys.path.insert(0, str(ENGINE_DIR))
+                sys.path.insert(0, str(ENGINE_DIR.parent))
+                from engine.cli_installer import detect_all, get_subscription_info, get_best_provider
+                status = detect_all()
+                self._send_json(200, {
+                    "providers": status,
+                    "subscriptions": get_subscription_info(),
+                    "best_provider": get_best_provider(),
+                })
+            except Exception as e:
+                logger.error(f"CLI status error: {e}")
+                self._send_json(500, {"error": str(e)})
+            return
+
         # API: config save
         if path == "/api/config":
             params = parse_qs(parsed.query)
@@ -242,8 +303,12 @@ class OnboardingHandler(BaseHTTPRequestHandler):
                     with open(CONFIG_FILE, "w") as f:
                         json.dump(config, f, indent=2)
                     self._send_json(200, {"status": "ok"})
-                    logger.info("Config saved! Starting engine...")
-                    threading.Thread(target=start_engine, daemon=True).start()
+                    if engine_running():
+                        logger.info("Config saved! Restarting app to apply changes...")
+                        threading.Thread(target=_restart_process, daemon=True).start()
+                    else:
+                        logger.info("Config saved! Starting engine...")
+                        threading.Thread(target=start_engine, daemon=True).start()
                     return
                 except Exception as e:
                     self._send_json(500, {"error": str(e)})
@@ -325,6 +390,12 @@ class OnboardingHandler(BaseHTTPRequestHandler):
             self._handle_config()
         elif self.path == "/api/import":
             self._handle_import()
+        elif self.path == "/api/telegram/claim":
+            self._handle_telegram_claim()
+        elif self.path == "/api/cli/install":
+            self._handle_cli_install()
+        elif self.path == "/api/cli/auth":
+            self._handle_cli_auth()
         else:
             self._send_json(404, {"error": "Not found"})
     
@@ -342,8 +413,12 @@ class OnboardingHandler(BaseHTTPRequestHandler):
             
             self._send_json(200, {"status": "ok"})
             
-            logger.info("Config saved! Starting engine...")
-            threading.Thread(target=start_engine, daemon=True).start()
+            if engine_running():
+                logger.info("Config saved! Restarting app to apply changes...")
+                threading.Thread(target=_restart_process, daemon=True).start()
+            else:
+                logger.info("Config saved! Starting engine...")
+                threading.Thread(target=start_engine, daemon=True).start()
             
         except Exception as e:
             self._send_json(500, {"error": str(e)})
@@ -408,6 +483,97 @@ class OnboardingHandler(BaseHTTPRequestHandler):
             logger.error(f"Import error: {e}")
             self._send_json(500, {"error": str(e)})
     
+    def _handle_telegram_claim(self):
+        """Claim a pre-made Telegram bot from the pool."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+
+        try:
+            data = json.loads(body) if body else {}
+            claimed_by = data.get("name", "onboarding")
+
+            sys.path.insert(0, str(ENGINE_DIR.parent))
+            from engine.bot_pool import claim_bot
+
+            result = claim_bot(claimed_by=claimed_by)
+            if result:
+                self._send_json(200, {
+                    "status": "ok",
+                    "token": result["token"],
+                    "username": result["username"],
+                    "display_name": result["display_name"],
+                    "deep_link": result["deep_link"],
+                })
+            else:
+                self._send_json(200, {
+                    "status": "empty",
+                    "error": "No bots available. Please set up manually.",
+                })
+        except Exception as e:
+            logger.error(f"Telegram claim error: {e}")
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_cli_install(self):
+        """Install a CLI tool silently."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+
+        try:
+            data = json.loads(body) if body else {}
+            provider = data.get("provider", "")
+            if not provider:
+                self._send_json(400, {"error": "Missing 'provider' field"})
+                return
+
+            sys.path.insert(0, str(ENGINE_DIR))
+            sys.path.insert(0, str(ENGINE_DIR.parent))
+            from engine.cli_installer import install_cli, check_cli_auth
+
+            import asyncio
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(install_cli(provider))
+            finally:
+                loop.close()
+
+            # After install, check auth status
+            auth = check_cli_auth(provider)
+            result["authenticated"] = auth["authenticated"]
+            result["subscription"] = auth.get("subscription")
+
+            self._send_json(200, result)
+        except Exception as e:
+            logger.error(f"CLI install error: {e}")
+            self._send_json(500, {"error": str(e)})
+
+    def _handle_cli_auth(self):
+        """Trigger browser-based OAuth for a CLI provider."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+
+        try:
+            data = json.loads(body) if body else {}
+            provider = data.get("provider", "")
+            if not provider:
+                self._send_json(400, {"error": "Missing 'provider' field"})
+                return
+
+            sys.path.insert(0, str(ENGINE_DIR))
+            sys.path.insert(0, str(ENGINE_DIR.parent))
+            from engine.cli_installer import launch_cli_auth
+
+            import asyncio
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(launch_cli_auth(provider))
+            finally:
+                loop.close()
+
+            self._send_json(200, result)
+        except Exception as e:
+            logger.error(f"CLI auth error: {e}")
+            self._send_json(500, {"error": str(e)})
+
     def do_OPTIONS(self):
         """Handle CORS preflight."""
         self.send_response(200)
@@ -499,12 +665,16 @@ def _acquire_lock() -> bool:
     if lock_file.exists():
         try:
             old_pid = int(lock_file.read_text().strip())
-            # Check if that process is actually running
-            os.kill(old_pid, 0)  # signal 0 = just check, don't kill
-            # Process exists — another instance is running
-            _dbg(f"Another instance running (PID {old_pid}). Exiting.")
-            logger.info(f"Kiyomi already running (PID {old_pid}). Exiting duplicate.")
-            return False
+            if old_pid == os.getpid():
+                # After an execv restart we keep the same PID; treat lock as ours.
+                _dbg("Lock file matches current PID; refreshing lock")
+            else:
+                # Check if that process is actually running
+                os.kill(old_pid, 0)  # signal 0 = just check, don't kill
+                # Process exists — another instance is running
+                _dbg(f"Another instance running (PID {old_pid}). Exiting.")
+                logger.info(f"Kiyomi already running (PID {old_pid}). Exiting duplicate.")
+                return False
         except (ValueError, ProcessLookupError, PermissionError):
             # Stale lock file or process gone — clean up
             _dbg("Stale lock file found, cleaning up")

@@ -309,7 +309,7 @@ class ContentCreatorSkill(Skill):
                     f"Consider reviewing your content strategy or posting times."
                 )
                 break
-            if a.get("views") and isinstance(a["views"], str) and "0" == a["views"]:
+            if a.get("views") is not None and str(a["views"]) in ("0", "0 views"):
                 nudges.append(
                     "📊 A recent post got very few views. "
                     "Check your titles, thumbnails, and posting time."

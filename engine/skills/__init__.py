@@ -12,6 +12,16 @@ try:
 except ImportError:
     from engine.skills.base import Skill
 
+# Ensure both import paths resolve to the same Skill class.
+# Without this, skills that `from engine.skills.base import Skill` get a
+# different class object than skills that `from skills.base import Skill`,
+# causing issubclass() to fail in discover_skills().
+import sys
+_base_mod = sys.modules.get("skills.base") or sys.modules.get("engine.skills.base")
+if _base_mod:
+    sys.modules.setdefault("skills.base", _base_mod)
+    sys.modules.setdefault("engine.skills.base", _base_mod)
+
 log = logging.getLogger(__name__)
 
 # Global registry: skill_name -> Skill instance

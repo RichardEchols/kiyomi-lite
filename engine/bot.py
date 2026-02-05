@@ -22,7 +22,15 @@ from telegram.ext import (
 )
 from telegram.constants import ChatAction
 
-from engine.config import load_config, save_config, get_api_key, get_cli_timeout, CONFIG_DIR, MEMORY_DIR
+from engine.config import (
+    ensure_dirs,
+    load_config,
+    save_config,
+    get_api_key,
+    get_cli_timeout,
+    CONFIG_DIR,
+    MEMORY_DIR,
+)
 from router import classify_message, pick_model
 from ai import chat
 from engine.memory import log_conversation, get_recent_context, extract_and_remember, load_all_memory, extract_facts_from_message, save_fact, export_memory, lookup_person
@@ -38,14 +46,11 @@ from get_to_know import (
     is_onboarding_active, is_onboarding_complete,
     start_onboarding, handle_onboarding_message
 )
-from calendar_integration import (
-    get_todays_events, get_upcoming_events, create_event,
-    find_free_time, morning_briefing, setup_calendar,
-    is_calendar_configured
-)
 from image_gen import is_image_request, generate_image
 from computer_control import is_computer_action, execute_computer_action
 
+# Ensure config/logs dirs exist before configuring logging.
+ensure_dirs()
 _bot_log_handlers = [logging.FileHandler(CONFIG_DIR / "logs" / "kiyomi.log")]
 if sys.stdout is not None:
     _bot_log_handlers.append(logging.StreamHandler())
@@ -424,29 +429,50 @@ async def _handle_message_inner(update: Update, context: ContextTypes.DEFAULT_TY
     # Classify and route
     task_type = classify_message(user_msg)
     provider, model = pick_model(task_type, config)
-    api_key = config.get(f"{provider}_key", "")
-    
-    if not api_key:
-        api_key = get_api_key(config)
-    
-    if not api_key:
-        await update.message.reply_text(
-            "I'm not connected to an AI service yet! 😅\n\n"
-            "Open Kiyomi settings to connect your AI account."
-        )
-        return
+    api_key = ""
+    if not provider.endswith("-cli"):
+        api_key = config.get(f"{provider}_key", "")
+        if not api_key:
+            api_key = get_api_key(config)
+        if not api_key:
+            await update.message.reply_text(
+                "I'm not connected to an AI service yet! 😅\n\n"
+                "Open Kiyomi settings to connect your AI account."
+            )
+            return
     
     # Build system prompt with memory
     system_prompt = build_system_prompt(config, user_dir=user_memory_dir)
+
+    # If the user sent URLs, pre-fetch content so it works with CLI providers too.
+    url_context = ""
+    urls_in_message = find_urls(user_msg)
+    try:
+        url_context = read_urls_in_message(user_msg)
+    except Exception as e:
+        logger.warning(f"URL prefetch failed: {e}")
+        url_context = ""
     
+    # If a URL was sent but we couldn't fetch it, be explicit instead of guessing.
+    if urls_in_message and not url_context:
+        await update.message.reply_text(
+            "I couldn't access that link from here. "
+            "Please paste the relevant text or try a different URL."
+        )
+        return
+
     # Snapshot files dir BEFORE AI call (to detect new files after)
     files_dir = CONFIG_DIR / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
     files_before = set(files_dir.iterdir()) if files_dir.exists() else set()
+
+    ai_message = user_msg
+    if url_context:
+        ai_message = f"{user_msg}\n\n[Content from links]\n{url_context}"
     
     # Chat with AI
     response = await chat(
-        message=user_msg,
+        message=ai_message,
         provider=provider,
         model=model,
         api_key=api_key,
@@ -477,7 +503,8 @@ async def _handle_message_inner(update: Update, context: ContextTypes.DEFAULT_TY
         if should_use_voice(user_msg, config):
             audio_path = await generate_voice_reply(response, config)
             if audio_path:
-                await update.message.reply_voice(voice=open(audio_path, "rb"))
+                with open(audio_path, "rb") as af:
+                    await update.message.reply_voice(voice=af)
                 # Still send text too (for readability)
     except ImportError:
         pass  # Voice module not available
@@ -500,9 +527,10 @@ async def _handle_message_inner(update: Update, context: ContextTypes.DEFAULT_TY
         for f in new_files:
             if f.is_file():
                 try:
-                    await update.message.reply_document(
-                        document=open(f, "rb"), filename=f.name
-                    )
+                    with open(f, "rb") as fh:
+                        await update.message.reply_document(
+                            document=fh, filename=f.name
+                        )
                     logger.info(f"Sent file: {f.name}")
                 except Exception as e:
                     logger.error(f"Failed to send file {f.name}: {e}")
@@ -761,7 +789,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💊 **I Track Health** — Meds, vitals, symptoms, appointments\n"
         "💰 **I Track Money** — Spending and income, naturally\n"
         "📋 **I Track Tasks** — To-dos caught from conversation\n"
-        "🗓️ **I Manage Your Calendar** — Google Calendar integration\n"
         "🔗 **I Read Links** — Send me any URL\n"
         "🔍 **I Search** — Current info, weather, news, anything\n"
         "🔧 **I Build Apps** — Complete web applications from your descriptions\n\n"
@@ -794,7 +821,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/reminders — Your active reminders\n"
         "/receipts — Recent scanned receipts\n"
         "/connect — Connect your bank account\n"
-        "/calendar — Today's events and calendar commands\n"
         "/profile — Your personal profile card 🪪\n"
         "/profile full — Full profile as a document\n"
         "/profile doctor — Health card for your doctor\n"
@@ -1145,57 +1171,6 @@ async def cmd_connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /calendar command — show today's events or set up calendar."""
-    if not is_calendar_configured():
-        result = setup_calendar()
-        await update.message.reply_text(result, parse_mode="Markdown")
-        return
-    
-    args = context.args
-    
-    await update.message.chat.send_action(ChatAction.TYPING)
-    
-    try:
-        if not args:
-            # Default: show today's events
-            result = get_todays_events()
-        elif args[0].lower() in ["today"]:
-            result = get_todays_events()
-        elif args[0].lower() in ["week", "upcoming"]:
-            days = 7
-            if len(args) > 1 and args[1].isdigit():
-                days = int(args[1])
-            result = get_upcoming_events(days)
-        elif args[0].lower() in ["free", "available"]:
-            date_arg = args[1] if len(args) > 1 else ""
-            result = find_free_time(date_arg)
-        elif args[0].lower() in ["setup", "config"]:
-            result = setup_calendar()
-        else:
-            result = (
-                "🗓️ **Calendar Commands:**\n\n"
-                "/calendar — Today's events\n"
-                "/calendar today — Today's events\n"
-                "/calendar week — Next 7 days\n"
-                "/calendar upcoming 14 — Next 14 days\n"
-                "/calendar free — Free time today\n"
-                "/calendar free 2025-02-15 — Free time on specific date\n"
-                "/calendar setup — Setup Google Calendar"
-            )
-        
-        # Split long responses
-        if len(result) > 4000:
-            chunks = [result[i:i+4000] for i in range(0, len(result), 4000)]
-            for chunk in chunks:
-                await update.message.reply_text(chunk, parse_mode="Markdown")
-        else:
-            await update.message.reply_text(result, parse_mode="Markdown")
-            
-    except Exception as e:
-        logger.error(f"Calendar command error: {e}")
-        await update.message.reply_text(f"❌ Calendar error: {str(e)[:200]}")
-
 
 
 
@@ -1385,7 +1360,6 @@ def _build_app():
     app.add_handler(CommandHandler("connect", cmd_connect))
     app.add_handler(CommandHandler("receipts", cmd_receipts))
     app.add_handler(CommandHandler("profile", cmd_profile))
-    app.add_handler(CommandHandler("calendar", cmd_calendar))
     app.add_handler(CommandHandler("apps", cmd_apps))
     
     # Messages

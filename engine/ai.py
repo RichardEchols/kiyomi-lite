@@ -58,45 +58,71 @@ async def _chat_cli(
     system_prompt: str = "",
     history: list = None,
     cli_path: str = "",
-    cli_timeout: int = 60,
+    cli_timeout: int = 300,
 ) -> str:
-    """Chat via CLI tools (Claude Code CLI, Codex CLI, etc.)."""
+    """Chat via CLI tools in agentic mode with automatic fallback.
+
+    CLIs run with full tool access (file I/O, web browsing, code execution).
+    System prompt is passed natively for Claude, prepended for others.
+    History is included as context in the message.
+    """
     try:
-        from cli_router import CLIRouter
-        
-        router = CLIRouter(timeout=cli_timeout)
-        
-        # Combine system prompt and message for CLI
-        full_prompt = message
-        if system_prompt:
-            full_prompt = f"{system_prompt}\n\nUser: {message}"
-        
-        # Add recent history context for CLI (last 4 messages)
-        if history:
-            recent_history = history[-4:]  # Last 2 conversations
-            history_text = ""
-            for msg in recent_history:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                history_text += f"{role.title()}: {content}\n"
-            
-            if history_text:
-                full_prompt = f"Recent conversation:\n{history_text}\n{full_prompt}"
-        
-        response = await router.chat(
-            message=full_prompt,
-            provider=provider,
-            cli_path=cli_path or None
-        )
-        
-        return response
-        
+        from engine.cli_router import CLIRouter
     except ImportError:
         logger.error("CLI router not available")
         return "CLI routing is not available. Please use API provider instead."
-    except Exception as e:
-        logger.error(f"CLI chat error ({provider}): {e}")
-        return f"Sorry, I had trouble with the CLI tool. Error: {str(e)[:100]}"
+
+    router = CLIRouter(timeout=cli_timeout)
+
+    # Build message with conversation history (system prompt handled by router)
+    user_message = message
+    if history:
+        recent_history = history[-6:]  # Last 6 messages (3 turns)
+        history_text = ""
+        for msg in recent_history:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            history_text += f"{role.title()}: {content}\n"
+        if history_text:
+            user_message = f"Recent conversation:\n{history_text}\nUser: {message}"
+
+    # Try primary provider
+    primary = provider.lower().replace("-cli", "")
+    providers_to_try = [primary]
+
+    # Build fallback list from authenticated CLIs
+    try:
+        from engine.cli_installer import check_cli_installed, check_cli_auth_bool
+        for fallback in ["claude", "gemini", "codex"]:
+            if fallback != primary and check_cli_installed(fallback) and check_cli_auth_bool(fallback):
+                providers_to_try.append(fallback)
+    except ImportError:
+        pass
+
+    _error_indicators = ("CLI error:", "timed out", "not found", "not authenticated", "not installed")
+
+    for i, prov in enumerate(providers_to_try):
+        try:
+            response = await router.chat(
+                message=user_message,
+                provider=prov,
+                cli_path=cli_path if i == 0 else None,
+                system_prompt=system_prompt,
+            )
+            # Check if response is an error
+            if any(indicator in response for indicator in _error_indicators):
+                if i < len(providers_to_try) - 1:
+                    logger.warning(f"{prov} CLI failed: {response[:100]}. Trying {providers_to_try[i+1]}...")
+                    continue
+            return response
+        except Exception as e:
+            logger.error(f"{prov} CLI error: {e}")
+            if i < len(providers_to_try) - 1:
+                logger.info(f"Falling back from {prov} to {providers_to_try[i+1]}")
+                continue
+            return f"Sorry, I had trouble with the CLI tool. Error: {str(e)[:100]}"
+
+    return "All CLI providers failed. Please check your settings."
 
 
 async def _chat_gemini(
@@ -324,7 +350,7 @@ async def _chat_openai(
                 tools = None
 
         create_kwargs = {
-            "model": model or "gpt-5.2",
+            "model": model or "gpt-4o",
             "messages": messages,
         }
         if tools:

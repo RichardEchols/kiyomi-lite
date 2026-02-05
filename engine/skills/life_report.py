@@ -86,20 +86,10 @@ class LifeReportSkill(Skill):
         # Weather (if available)
         # TODO: integrate weather API
 
-        # Today's events (if calendar connected)
-        try:
-            from calendar_integration import get_todays_events
-            events_text = get_todays_events()
-            if events_text and "No events" not in events_text and "not configured" not in events_text.lower():
-                lines.append("📅 **Today's Schedule:**")
-                lines.append(events_text[:500])
-                lines.append("")
-        except (ImportError, Exception):
-            pass
 
         # Upcoming birthdays
         try:
-            from skills.relationships import get_relationships_skill
+            from engine.skills.relationships import get_relationships_skill
             rs = get_relationships_skill()
             bday_text = rs.birthday_reminder_text()
             if bday_text:
@@ -110,7 +100,7 @@ class LifeReportSkill(Skill):
 
         # Active reminders
         try:
-            from reminders import get_due_reminders
+            from engine.reminders import get_due_reminders
             due = get_due_reminders(datetime.now())
             if due:
                 lines.append("⏰ **Reminders:**")
@@ -122,10 +112,10 @@ class LifeReportSkill(Skill):
 
         # Quick financial snapshot
         try:
-            from plaid_integration import is_bank_connected
+            from engine.plaid_integration import is_bank_connected
             if is_bank_connected():
                 plaid_cfg = config.get("plaid", {})
-                from plaid_integration import get_balances
+                from engine.plaid_integration import get_balances
                 bal = get_balances(
                     plaid_cfg.get("client_id", ""),
                     plaid_cfg.get("secret", ""),
@@ -139,9 +129,9 @@ class LifeReportSkill(Skill):
 
         # Task summary
         try:
-            from skills.tasks import get_tasks_skill
+            from engine.skills.tasks import get_tasks_skill
             ts = get_tasks_skill()
-            pending = [t for t in ts.get_tasks() if t.get("status") == "pending"]
+            pending = ts.get_open_tasks()
             if pending:
                 lines.append(f"📋 **Tasks ({len(pending)} pending):**")
                 for t in pending[:3]:
@@ -164,9 +154,9 @@ class LifeReportSkill(Skill):
 
         # Health summary
         try:
-            from skills.health import get_health_skill
+            from engine.skills.health import get_health_skill
             hs = get_health_skill()
-            summary = hs.get_daily_summary()
+            summary = hs.get_morning_brief()
             if summary:
                 lines.append("💊 **Health:**")
                 lines.append(f"  {summary}")
@@ -176,15 +166,15 @@ class LifeReportSkill(Skill):
 
         # Tasks completed today
         try:
-            from skills.tasks import get_tasks_skill
+            from engine.skills.tasks import get_tasks_skill
             ts = get_tasks_skill()
-            all_tasks = ts.get_tasks()
+            all_tasks = ts.load_data().get("tasks", [])
             completed_today = [
                 t for t in all_tasks
-                if t.get("status") == "done"
+                if t.get("done")
                 and t.get("completed_at", "").startswith(today.strftime("%Y-%m-%d"))
             ]
-            pending = [t for t in all_tasks if t.get("status") == "pending"]
+            pending = [t for t in all_tasks if not t.get("done")]
 
             if completed_today:
                 lines.append(f"✅ **Completed ({len(completed_today)}):**")
@@ -259,9 +249,9 @@ class LifeReportSkill(Skill):
 
         # ── Health ──
         try:
-            from skills.health import get_health_skill
+            from engine.skills.health import get_health_skill
             hs = get_health_skill()
-            week_summary = hs.get_weekly_summary()
+            week_summary = hs.get_prompt_context()
             if week_summary:
                 lines.append("💊 **HEALTH**")
                 lines.append(week_summary)
@@ -271,11 +261,11 @@ class LifeReportSkill(Skill):
 
         # ── Tasks ──
         try:
-            from skills.tasks import get_tasks_skill
+            from engine.skills.tasks import get_tasks_skill
             ts = get_tasks_skill()
-            all_tasks = ts.get_tasks()
-            completed = [t for t in all_tasks if t.get("status") == "done"]
-            pending = [t for t in all_tasks if t.get("status") == "pending"]
+            all_tasks = ts.load_data().get("tasks", [])
+            completed = [t for t in all_tasks if t.get("done")]
+            pending = [t for t in all_tasks if not t.get("done")]
 
             lines.append("📋 **TASKS**")
             lines.append(f"  Completed: {len(completed)} | Pending: {len(pending)}")
@@ -289,7 +279,7 @@ class LifeReportSkill(Skill):
 
         # ── Relationships ──
         try:
-            from skills.relationships import get_relationships_skill
+            from engine.skills.relationships import get_relationships_skill
             rs = get_relationships_skill()
             upcoming = rs.get_upcoming_birthdays(14)
             if upcoming:
